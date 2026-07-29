@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ReadOne</title>
+<script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<style>
+  body { font-family: -apple-system, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 16px; color: #1a1a1a; }
+  h1 { display: flex; align-items: center; gap: 10px; }
+  .import { display: flex; gap: 8px; margin-bottom: 12px; }
+  .import input[type=url] { flex: 1; padding: 8px; font-size: 14px; }
+  .actions { display: flex; gap: 10px; align-items: center; margin: 16px 0; }
+  a.button, button { padding: 8px 14px; border: 1px solid #ccc; background: #f5f5f5; border-radius: 4px; cursor: pointer; font-size: 14px; text-decoration: none; color: inherit; }
+  a.button:hover, button:hover { background: #eee; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+  th, td { text-align: left; padding: 8px; border-bottom: 1px solid #eee; font-size: 14px; vertical-align: top; }
+  td.meta { color: #666; font-size: 12px; }
+  td a { color: #06c; }
+  .error { color: #b00020; font-size: 14px; margin: 8px 0; }
+</style>
+</head>
+<body x-data="app()" x-init="init()">
+  <h1>📚 ReadOne</h1>
+
+  <form class="import" x-on:submit.prevent="importURL()">
+    <input type="url" x-model="importUrlValue" placeholder="https://example.com/article" required>
+    <button type="submit" x-bind:disabled="importing"><span x-show="!importing">Import URL</span><span x-show="importing">Importing…</span></button>
+  </form>
+  <div class="error" x-show="error" x-text="error"></div>
+
+  <div class="actions">
+    <a class="button" href="/readone.user.js" target="_blank">📖 Install Userscript</a>
+    <button x-on:click="downloadEpub()" x-bind:disabled="selected.length === 0 || exporting">
+      <span x-show="!exporting">⬇ Download selected as EPUB (<span x-text="selected.length"></span>)</span>
+      <span x-show="exporting">Building EPUB…</span>
+    </button>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th><input type="checkbox" x-on:click="selectAll($event.target.checked)"></th>
+        <th>Title</th>
+        <th>Source</th>
+        <th>Saved</th>
+      </tr>
+    </thead>
+    <tbody>
+      <template x-if="articles.length === 0">
+        <tr><td colspan="4" class="meta">No articles saved yet.</td></tr>
+      </template>
+      <template x-for="a in articles" x-bind:key="a.id">
+        <tr>
+          <td><input type="checkbox" x-bind:value="a.id" x-model="selected"></td>
+          <td><a x-bind:href="a.url" target="_blank" x-text="a.title"></a></td>
+          <td class="meta" x-text="[a.siteName, a.byline].filter(Boolean).join(' · ')"></td>
+          <td class="meta" x-text="new Date(a.createdAt).toLocaleString()"></td>
+        </tr>
+      </template>
+    </tbody>
+  </table>
+
+  <script>
+    function app() {
+      return {
+        articles: [],
+        selected: [],
+        importUrlValue: '',
+        importing: false,
+        exporting: false,
+        error: '',
+
+        async init() {
+          await this.refresh();
+        },
+
+        async refresh() {
+          const res = await fetch('/api/articles');
+          this.articles = await res.json() || [];
+        },
+
+        selectAll(checked) {
+          this.selected = checked ? this.articles.map(a => String(a.id)) : [];
+        },
+
+        async importURL() {
+          this.error = '';
+          this.importing = true;
+          try {
+            const res = await fetch('/api/articles/import-url', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ url: this.importUrlValue }),
+            });
+            if (!res.ok) throw new Error((await res.json().catch(() => null))?.message || `HTTP ${res.status}`);
+            this.importUrlValue = '';
+            await this.refresh();
+          } catch (e) {
+            this.error = `Import failed: ${e.message}`;
+          } finally {
+            this.importing = false;
+          }
+        },
+
+        async downloadEpub() {
+          this.error = '';
+          this.exporting = true;
+          try {
+            const res = await fetch('/articles/epub', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ids: this.selected.map(Number) }),
+            });
+            if (!res.ok) throw new Error((await res.json().catch(() => null))?.message || `HTTP ${res.status}`);
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = 'articles.epub';
+            link.click();
+            URL.revokeObjectURL(url);
+          } catch (e) {
+            this.error = `EPUB export failed: ${e.message}`;
+          } finally {
+            this.exporting = false;
+          }
+        },
+      };
+    }
+  </script>
+</body>
+</html>
