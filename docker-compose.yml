@@ -1,0 +1,11 @@
+services:
+  readone:
+    image: ghcr.io/abdusco/readone:latest
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - readone-data:/app/data
+
+volumes:
+  readone-data:
