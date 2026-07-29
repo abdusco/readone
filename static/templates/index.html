@@ -3,10 +3,12 @@
 <head>
 <meta charset="utf-8">
 <title>ReadOne</title>
+<link rel="icon" type="image/svg+xml" href="/assets/logo.svg">
 <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
 <style>
   body { font-family: -apple-system, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 16px; color: #1a1a1a; }
   h1 { display: flex; align-items: center; gap: 10px; }
+  h1 img { width: 32px; height: 32px; }
   .import { display: flex; gap: 8px; margin-bottom: 12px; }
   .import input[type=url] { flex: 1; padding: 8px; font-size: 14px; }
   .actions { display: flex; gap: 10px; align-items: center; margin: 16px 0; }
@@ -21,7 +23,7 @@
 </style>
 </head>
 <body x-data="app()" x-init="init()">
-  <h1>📚 ReadOne</h1>
+  <h1><img src="/assets/logo.svg" alt=""> ReadOne</h1>
 
   <form class="import" x-on:submit.prevent="importURL()">
     <input type="url" x-model="importUrlValue" placeholder="https://example.com/article" required>

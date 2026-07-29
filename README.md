@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.svg" width="120" alt="readone logo">
+  <img src="static/assets/logo.svg" width="120" alt="readone logo">
 </p>
 
 # readone
@@ -20,6 +20,7 @@ The app listens on `:8080` and stores its SQLite database in the `readone-data` 
 | --------- | ------------------- | -------------------------- |
 | `PORT`    | `8080`               | HTTP listen port           |
 | `DB_PATH` | `/app/data/data.db`  | Path to the SQLite database |
+| `DEBUG`   | unset                | Set to `1` to load `static/` (templates and `/assets/*`) straight from disk instead of the embedded build, so edits show up on restart without a rebuild |
 
 ## Userscript
 
@@ -47,6 +48,9 @@ as plain remote URLs — nothing breaks, they just aren't bundled.
 ```sh
 go run .
 ```
+
+Run with `DEBUG=1 go run .` to load `static/` from disk instead of the
+embedded build.
 
 ## Releases
 

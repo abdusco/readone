@@ -4,11 +4,12 @@ import (
 	"archive/zip"
 	"bytes"
 	"database/sql"
-	_ "embed"
+	"embed"
 	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -18,13 +19,13 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 )
 
-//go:embed templates/index.html
-var indexHTML []byte
+//go:embed static
+var staticFS embed.FS
 
-//go:embed templates/reader.html
-var readerHTMLSrc string
-
-var readerTpl = template.Must(template.New("reader").Parse(readerHTMLSrc))
+var (
+	indexHTML []byte
+	readerTpl *template.Template
+)
 
 type server struct {
 	db *sql.DB
@@ -55,11 +56,38 @@ func main() {
 	}))
 	e.Use(middleware.Recover())
 
+	// DEBUG=1 serves templates/assets straight from disk so edits show up on
+	// refresh instead of requiring a rebuild.
+	var content fs.FS
+	if os.Getenv("DEBUG") == "1" {
+		content = os.DirFS("static")
+	} else {
+		content, err = fs.Sub(staticFS, "static")
+		if err != nil {
+			log.Fatalf("sub static fs: %v", err)
+		}
+	}
+
+	if indexHTML, err = fs.ReadFile(content, "templates/index.html"); err != nil {
+		log.Fatalf("read index.html: %v", err)
+	}
+	readerHTMLSrc, err := fs.ReadFile(content, "templates/reader.html")
+	if err != nil {
+		log.Fatalf("read reader.html: %v", err)
+	}
+	readerTpl = template.Must(template.New("reader").Parse(string(readerHTMLSrc)))
+
+	assetsFS, err := fs.Sub(content, "assets")
+	if err != nil {
+		log.Fatalf("sub assets fs: %v", err)
+	}
+
 	e.GET("/", s.handleIndex)
 	e.GET("/articles/:id", s.handleReaderPage)
 	e.GET("/articles/:id/assets/*", s.handleArticleAsset)
 	e.POST("/articles/epub", s.handleEPUB)
 	e.GET("/readone.user.js", serveUserscript)
+	e.StaticFS("/assets", assetsFS)
 
 	// The userscript runs on whatever article page the user is reading, so
 	// its origin can't be known in advance — allow any origin to call these.
