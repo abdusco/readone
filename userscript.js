@@ -1,14 +1,11 @@
 // ==UserScript==
-// @name         Readable Extractor
+// @name         Readability by readone
 // @namespace    readable-extractor
-// @version      1.8
+// @version      1.9
 // @description  Simplify page with Readability.js, download as Markdown
 // @match        *://*/*
 // @noframes
 // @grant        GM_setClipboard
-// @require      https://unpkg.com/@mozilla/readability@0.5.0/Readability.js
-// @require      https://unpkg.com/turndown@7.1.2/dist/turndown.js
-// @require      https://unpkg.com/jszip@3.10.1/dist/jszip.min.js
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -21,6 +18,32 @@
   const SAVE_URL = "__SAVE_URL__";
   const saveConfigured = SAVE_URL && SAVE_URL !== '__SAVE_URL__';
 
+  // Readability/Turndown/JSZip used to be @require'd, which makes Tampermonkey
+  // execute all three on every single page load matching @match *://*/*, even
+  // pages the Reader button is never clicked on. Load them on demand instead,
+  // the first time the button is used, and cache the loading promise so a
+  // second click doesn't reload them.
+  let librariesPromise = null;
+  function loadScript(url) {
+    return new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = url;
+      s.onload = () => { s.remove(); resolve(); };
+      s.onerror = () => { s.remove(); reject(new Error(`failed to load ${url}`)); };
+      (document.head || document.documentElement).appendChild(s);
+    });
+  }
+  function ensureLibraries() {
+    if (!librariesPromise) {
+      librariesPromise = Promise.all([
+        loadScript('https://unpkg.com/@mozilla/readability@0.5.0/Readability.js'),
+        loadScript('https://unpkg.com/turndown@7.1.2/dist/turndown.js'),
+        loadScript('https://unpkg.com/jszip@3.10.1/dist/jszip.min.js'),
+      ]);
+    }
+    return librariesPromise;
+  }
+
   // Downloads every remote <img> in contentHtml from the browser (so it goes
   // out with the same cookies/UA/referrer that already got the page itself
   // past any bot-blocking) and packs them into a zip, rewriting each src to
@@ -29,9 +52,10 @@
   // that fail to fetch (e.g. no CORS header on the response) are left as
   // remote URLs, same as before this feature existed.
   async function buildAssetsZip(contentHtml) {
+    await ensureLibraries();
     const wrapper = document.createElement('div');
     wrapper.innerHTML = contentHtml;
-    const zip = new JSZip();
+    const zip = new unsafeWindow.JSZip();
     let count = 0;
 
     for (const img of wrapper.querySelectorAll('img')) {
@@ -246,6 +270,7 @@
   }
 
   async function extract() {
+    await ensureLibraries();
     await autoScrollFullPage();
     promoteNoscriptImages(document.body);
     normalizeImages(document.body);
@@ -254,7 +279,7 @@
     const lead = findLeadImage(document.body);
 
     const docClone = document.cloneNode(true);
-    const reader = new Readability(docClone, { charThreshold: 100 });
+    const reader = new unsafeWindow.Readability(docClone, { charThreshold: 100 });
     const art = reader.parse();
     return ensureLeadImage(art, lead);
   }
@@ -279,7 +304,7 @@
   }
 
   function toMarkdown(art) {
-    const td = new TurndownService({
+    const td = new unsafeWindow.TurndownService({
       headingStyle: 'atx',
       codeBlockStyle: 'fenced',
       bulletListMarker: '-',
