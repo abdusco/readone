@@ -5,10 +5,12 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -16,6 +18,11 @@ import (
 
 //go:embed templates/index.html
 var indexHTML []byte
+
+//go:embed templates/reader.html
+var readerHTMLSrc string
+
+var readerTpl = template.Must(template.New("reader").Parse(readerHTMLSrc))
 
 type server struct {
 	db *sql.DB
@@ -47,6 +54,7 @@ func main() {
 	e.Use(middleware.Recover())
 
 	e.GET("/", s.handleIndex)
+	e.GET("/articles/:id", s.handleReaderPage)
 	e.POST("/articles/epub", s.handleEPUB)
 	e.GET("/readone.user.js", serveUserscript)
 
@@ -71,6 +79,30 @@ func main() {
 
 func (s *server) handleIndex(c echo.Context) error {
 	return c.Blob(http.StatusOK, "text/html; charset=utf-8", indexHTML)
+}
+
+func (s *server) handleReaderPage(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid article id")
+	}
+	articles, err := getArticlesByIDs(s.db, []int64{id})
+	if err != nil {
+		return err
+	}
+	if len(articles) == 0 {
+		return echo.NewHTTPError(http.StatusNotFound, "article not found")
+	}
+	a := articles[0]
+
+	c.Response().Header().Set(echo.HeaderContentType, "text/html; charset=utf-8")
+	return readerTpl.Execute(c.Response(), map[string]any{
+		"Title":    a.Title,
+		"Byline":   a.Byline,
+		"SiteName": a.SiteName,
+		"URL":      a.URL,
+		"Content":  template.HTML(a.ContentHTML),
+	})
 }
 
 func (s *server) handleListArticles(c echo.Context) error {

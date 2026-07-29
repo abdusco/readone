@@ -53,7 +53,7 @@
       <template x-for="a in articles" x-bind:key="a.id">
         <tr>
           <td><input type="checkbox" x-bind:value="a.id" x-model="selected"></td>
-          <td><a x-bind:href="a.url" target="_blank" x-text="a.title"></a></td>
+          <td><a x-bind:href="`/articles/${a.id}`" x-text="a.title"></a></td>
           <td class="meta" x-text="[a.siteName, a.byline].filter(Boolean).join(' · ')"></td>
           <td class="meta" x-text="new Date(a.createdAt).toLocaleString()"></td>
         </tr>
