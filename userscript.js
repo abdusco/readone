@@ -1,13 +1,14 @@
 // ==UserScript==
 // @name         Readable Extractor
 // @namespace    readable-extractor
-// @version      1.7
+// @version      1.8
 // @description  Simplify page with Readability.js, download as Markdown
 // @match        *://*/*
 // @noframes
 // @grant        GM_setClipboard
 // @require      https://unpkg.com/@mozilla/readability@0.5.0/Readability.js
 // @require      https://unpkg.com/turndown@7.1.2/dist/turndown.js
+// @require      https://unpkg.com/jszip@3.10.1/dist/jszip.min.js
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -20,18 +21,56 @@
   const SAVE_URL = "__SAVE_URL__";
   const saveConfigured = SAVE_URL && SAVE_URL !== '__SAVE_URL__';
 
+  // Downloads every remote <img> in contentHtml from the browser (so it goes
+  // out with the same cookies/UA/referrer that already got the page itself
+  // past any bot-blocking) and packs them into a zip, rewriting each src to
+  // its path inside that zip. This makes the images available to EPUB export
+  // later even if the server can't reach the origin site directly. Images
+  // that fail to fetch (e.g. no CORS header on the response) are left as
+  // remote URLs, same as before this feature existed.
+  async function buildAssetsZip(contentHtml) {
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = contentHtml;
+    const zip = new JSZip();
+    let count = 0;
+
+    for (const img of wrapper.querySelectorAll('img')) {
+      const src = img.getAttribute('src');
+      if (!src || !/^https?:/i.test(src)) continue;
+      try {
+        const res = await fetch(src);
+        if (!res.ok) continue;
+        const blob = await res.blob();
+        const ext = (blob.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg').split('+')[0];
+        const name = `images/${count}.${ext}`;
+        zip.file(name, blob);
+        img.setAttribute('src', name);
+        count++;
+      } catch {
+        // CORS-blocked or network error — leave the original remote src.
+      }
+    }
+
+    return {
+      contentHtml: wrapper.innerHTML,
+      assetsZip: count > 0 ? await zip.generateAsync({ type: 'blob' }) : null,
+    };
+  }
+
   async function saveArticle(art) {
-    const res = await fetch(`${SAVE_URL}/api/articles`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        url: extractArchivedUrl() || location.href,
-        title: art.title || '',
-        byline: art.byline || '',
-        siteName: art.siteName || '',
-        contentHtml: art.content || '',
-      }),
-    });
+    const { contentHtml, assetsZip } = await buildAssetsZip(art.content || '');
+
+    const form = new FormData();
+    form.append('metadata', JSON.stringify({
+      url: extractArchivedUrl() || location.href,
+      title: art.title || '',
+      byline: art.byline || '',
+      siteName: art.siteName || '',
+      contentHtml,
+    }));
+    if (assetsZip) form.append('assets', assetsZip, 'assets.zip');
+
+    const res = await fetch(`${SAVE_URL}/api/articles`, { method: 'POST', body: form });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
   }
 

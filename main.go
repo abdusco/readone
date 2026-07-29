@@ -3,7 +3,9 @@ package main
 import (
 	"database/sql"
 	_ "embed"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -108,20 +110,38 @@ type apiImportRequest struct {
 	ContentHTML string `json:"contentHtml"`
 }
 
+// handleAPIImport accepts multipart/form-data: a "metadata" JSON field plus
+// an optional "assets" zip file (images the userscript already downloaded
+// browser-side, so EPUB export doesn't depend on the origin site being
+// reachable from the server later).
 func (s *server) handleAPIImport(c echo.Context) error {
 	var req apiImportRequest
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid JSON body")
+	if err := json.Unmarshal([]byte(c.FormValue("metadata")), &req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid metadata field")
 	}
 	if req.URL == "" || req.ContentHTML == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "url and contentHtml are required")
 	}
+
+	var assets []byte
+	if fh, err := c.FormFile("assets"); err == nil {
+		f, err := fh.Open()
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		if assets, err = io.ReadAll(f); err != nil {
+			return err
+		}
+	}
+
 	id, err := insertArticle(s.db, Article{
 		Title:       req.Title,
 		Byline:      req.Byline,
 		SiteName:    req.SiteName,
 		URL:         req.URL,
 		ContentHTML: req.ContentHTML,
+		Assets:      assets,
 	})
 	if err != nil {
 		return err
