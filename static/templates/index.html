@@ -2,24 +2,43 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ReadOne</title>
 <link rel="icon" type="image/svg+xml" href="/assets/logo.svg">
 <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
 <style>
+  * { box-sizing: border-box; }
   body { font-family: -apple-system, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 16px; color: #1a1a1a; }
   h1 { display: flex; align-items: center; gap: 10px; }
   h1 img { width: 32px; height: 32px; }
   .import { display: flex; gap: 8px; margin-bottom: 12px; }
-  .import input[type=url] { flex: 1; padding: 8px; font-size: 14px; }
-  .actions { display: flex; gap: 10px; align-items: center; margin: 16px 0; }
+  .import input[type=url] { flex: 1; min-width: 0; padding: 8px; font-size: 14px; border: 1px solid #ccc; border-radius: 4px; background: #fff; color: #1a1a1a; }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 16px 0; }
   a.button, button { padding: 8px 14px; border: 1px solid #ccc; background: #f5f5f5; border-radius: 4px; cursor: pointer; font-size: 14px; text-decoration: none; color: inherit; }
   a.button:hover, button:hover { background: #eee; }
   button:disabled { opacity: .5; cursor: not-allowed; }
-  table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+  .table-wrap { overflow-x: auto; margin-top: 16px; }
+  table { width: 100%; border-collapse: collapse; }
   th, td { text-align: left; padding: 8px; border-bottom: 1px solid #eee; font-size: 14px; vertical-align: top; }
-  td.meta { color: #666; font-size: 12px; }
+  td.meta { color: #666; font-size: 12px; white-space: nowrap; }
   td a { color: #06c; }
   .error { color: #b00020; font-size: 14px; margin: 8px 0; }
+
+  @media (max-width: 480px) {
+    body { margin: 20px auto; }
+    .import { flex-direction: column; }
+  }
+
+  @media (prefers-color-scheme: dark) {
+    body { background: #1a1a1a; color: #eee; }
+    .import input[type=url] { background: #2a2a2a; border-color: #444; color: #eee; }
+    a.button, button { background: #2a2a2a; border-color: #444; color: #eee; }
+    a.button:hover, button:hover { background: #333; }
+    th, td { border-bottom-color: #333; }
+    td.meta { color: #999; }
+    td a { color: #6cb2ff; }
+    .error { color: #ff6b6b; }
+  }
 </style>
 </head>
 <body x-data="app()" x-init="init()">
@@ -39,6 +58,7 @@
     </button>
   </div>
 
+  <div class="table-wrap">
   <table>
     <thead>
       <tr>
@@ -62,6 +82,7 @@
       </template>
     </tbody>
   </table>
+  </div>
 
   <script>
     function app() {
