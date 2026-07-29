@@ -2,6 +2,9 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -38,24 +41,30 @@ CREATE TABLE IF NOT EXISTS articles (
 `
 
 func openDB(path string) (*sql.DB, error) {
+	if dir := filepath.Dir(path); dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, fmt.Errorf("create db directory %s: %w", dir, err)
+		}
+	}
+
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open sqlite database: %w", err)
 	}
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
-		return nil, err
+		return nil, fmt.Errorf("create schema: %w", err)
 	}
 	// De-dupe any rows saved before the URL uniqueness constraint existed,
 	// keeping the most recently inserted row per URL, so the index below
 	// can always be created.
 	if _, err := db.Exec(`DELETE FROM articles WHERE id NOT IN (SELECT MAX(id) FROM articles GROUP BY url)`); err != nil {
 		db.Close()
-		return nil, err
+		return nil, fmt.Errorf("de-dupe articles by url: %w", err)
 	}
 	if _, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_articles_url ON articles(url)`); err != nil {
 		db.Close()
-		return nil, err
+		return nil, fmt.Errorf("create url unique index: %w", err)
 	}
 	return db, nil
 }
