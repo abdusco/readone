@@ -87,6 +87,7 @@ func main() {
 	e.GET("/articles/:id/assets/*", s.handleArticleAsset)
 	e.POST("/articles/epub", s.handleEPUB)
 	e.GET("/readone.user.js", serveUserscript)
+	e.GET("/robots.txt", handleRobots)
 	e.StaticFS("/assets", assetsFS)
 
 	// The userscript runs on whatever article page the user is reading, so
@@ -106,6 +107,12 @@ func main() {
 		port = "8080"
 	}
 	e.Logger.Fatal(e.Start(":" + port))
+}
+
+// This is a personal read-it-later tool, not something meant to be indexed —
+// block every crawler rather than trying to enumerate specific ones.
+func handleRobots(c echo.Context) error {
+	return c.String(http.StatusOK, "User-agent: *\nDisallow: /\n")
 }
 
 func (s *server) handleIndex(c echo.Context) error {
