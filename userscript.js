@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Readability by readone
 // @namespace    readable-extractor
-// @version      2.0
+// @version      2.1
 // @description  Simplify page with Readability.js, download as Markdown
 // @match        *://*/*
 // @noframes
@@ -453,5 +453,10 @@
     document.body.appendChild(btn);
   }
 
-  addTrigger();
+  // Don't show the Reader button on ReadOne's own pages (the article list,
+  // reader view, etc.) — there's nothing to extract there, and clicking it
+  // would just try to Readability-parse the app's own UI.
+  if (!saveConfigured || location.origin !== SAVE_URL) {
+    addTrigger();
+  }
 })();
