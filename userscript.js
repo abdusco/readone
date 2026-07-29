@@ -1,12 +1,14 @@
 // ==UserScript==
 // @name         Readability by readone
 // @namespace    readable-extractor
-// @version      2.1
+// @version      2.2
 // @description  Simplify page with Readability.js, download as Markdown
 // @match        *://*/*
 // @noframes
 // @grant        GM_setClipboard
 // @grant        GM_xmlhttpRequest
+// @grant        GM_getValue
+// @grant        GM_setValue
 // @connect      *
 // @run-at       document-idle
 // ==/UserScript==
@@ -425,19 +427,77 @@
     }
   }
 
+  const TRIGGER_WIDTH = 40;
+  const TRIGGER_PEEK = 14; // px visible while tucked away
+  const TRIGGER_TOP_KEY = 're-trigger-top';
+
   function addTrigger() {
+    const style = document.createElement('style');
+    style.textContent = `
+      #re-trigger {
+        position: fixed; left: ${TRIGGER_PEEK - TRIGGER_WIDTH}px; z-index: 2147483646;
+        width: ${TRIGGER_WIDTH}px; height: ${TRIGGER_WIDTH}px; padding: 0;
+        border: none; border-radius: 0 20px 20px 0;
+        background: #222; color: #fff; font-size: 18px; line-height: ${TRIGGER_WIDTH}px;
+        text-align: center; cursor: grab;
+        box-shadow: 2px 2px 8px rgba(0,0,0,.3);
+        transition: left .15s ease;
+        touch-action: none; user-select: none;
+      }
+      #re-trigger:hover, #re-trigger.re-dragging { left: 0; }
+      #re-trigger.re-dragging { cursor: grabbing; transition: none; }
+    `;
+    document.head.appendChild(style);
+
     const btn = document.createElement('button');
-    btn.textContent = '📖 Reader';
-    Object.assign(btn.style, {
-      position: 'fixed', bottom: '20px', right: '20px', zIndex: 2147483646,
-      padding: '10px 16px', borderRadius: '24px', border: 'none',
-      background: '#222', color: '#fff', fontSize: '14px', cursor: 'pointer',
-      boxShadow: '0 2px 8px rgba(0,0,0,.3)', fontFamily: 'sans-serif',
+    btn.id = 're-trigger';
+    btn.textContent = '📖';
+    btn.title = 'Open Reader (drag to reposition)';
+
+    const savedTop = typeof GM_getValue === 'function' ? GM_getValue(TRIGGER_TOP_KEY, null) : null;
+    btn.style.top = `${savedTop != null ? savedTop : window.innerHeight * 0.5}px`;
+
+    // Drag to reposition vertically, tucked-tab-on-hover to open. A pointer
+    // move past a small threshold counts as a drag and suppresses the
+    // following click, so dragging doesn't also trigger extraction.
+    let dragging = false;
+    let moved = false;
+    let startY = 0;
+    let startTop = 0;
+
+    btn.addEventListener('pointerdown', e => {
+      dragging = true;
+      moved = false;
+      startY = e.clientY;
+      startTop = btn.getBoundingClientRect().top;
+      btn.setPointerCapture(e.pointerId);
+      btn.classList.add('re-dragging');
     });
-    btn.onclick = async () => {
+
+    btn.addEventListener('pointermove', e => {
+      if (!dragging) return;
+      const dy = e.clientY - startY;
+      if (Math.abs(dy) > 4) moved = true;
+      const top = Math.max(0, Math.min(startTop + dy, window.innerHeight - TRIGGER_WIDTH));
+      btn.style.top = `${top}px`;
+    });
+
+    const endDrag = () => {
+      if (!dragging) return;
+      dragging = false;
+      btn.classList.remove('re-dragging');
+      if (moved && typeof GM_setValue === 'function') {
+        GM_setValue(TRIGGER_TOP_KEY, parseFloat(btn.style.top));
+      }
+    };
+    btn.addEventListener('pointerup', endDrag);
+    btn.addEventListener('pointercancel', endDrag);
+
+    btn.addEventListener('click', async () => {
+      if (moved) { moved = false; return; }
       btn.disabled = true;
       const originalText = btn.textContent;
-      btn.textContent = '⏳ Scanning…';
+      btn.textContent = '⏳';
       try {
         const art = await extract();
         if (!art) {
@@ -449,7 +509,8 @@
         btn.disabled = false;
         btn.textContent = originalText;
       }
-    };
+    });
+
     document.body.appendChild(btn);
   }
 
