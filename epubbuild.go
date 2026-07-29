@@ -137,6 +137,48 @@ func embedOneImage(book *epub.Epub, zr *zip.Reader, src string, articleIdx, imgI
 	return internalPath, true
 }
 
+// rewriteAssetPaths rewrites <img src="images/0.jpg">-style relative paths
+// (left in place by the userscript's zip-asset bundling) into an absolute
+// URL the browser can actually fetch, for rendering the article outside of
+// EPUB export (the reader page, currently). Those relative paths only ever
+// resolved to anything inside the zip go-epub embeds them from — on their
+// own they're not servable, which is why images broke on the reader page
+// once asset bundling shipped.
+func rewriteAssetPaths(contentHTML string, articleID int64) string {
+	doc, err := xhtml.Parse(strings.NewReader(contentHTML))
+	if err != nil {
+		return contentHTML
+	}
+
+	prefix := fmt.Sprintf("/articles/%d/assets/", articleID)
+	var walk func(*xhtml.Node)
+	walk = func(n *xhtml.Node) {
+		if n.Type == xhtml.ElementNode && n.Data == "img" {
+			for i, attr := range n.Attr {
+				if attr.Key == "src" && !strings.HasPrefix(attr.Val, "http") && !strings.HasPrefix(attr.Val, "/") && !strings.HasPrefix(attr.Val, "data:") {
+					n.Attr[i].Val = prefix + attr.Val
+				}
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			walk(c)
+		}
+	}
+	walk(doc)
+
+	body := findNode(doc, "body")
+	if body == nil {
+		return contentHTML
+	}
+	var buf bytes.Buffer
+	for c := body.FirstChild; c != nil; c = c.NextSibling {
+		if err := xhtml.Render(&buf, c); err != nil {
+			return contentHTML
+		}
+	}
+	return buf.String()
+}
+
 func readZipEntry(zr *zip.Reader, name string) ([]byte, bool) {
 	name = strings.TrimPrefix(name, "./")
 	for _, f := range zr.File {

@@ -1,11 +1,13 @@
 // ==UserScript==
 // @name         Readability by readone
 // @namespace    readable-extractor
-// @version      1.9
+// @version      2.0
 // @description  Simplify page with Readability.js, download as Markdown
 // @match        *://*/*
 // @noframes
 // @grant        GM_setClipboard
+// @grant        GM_xmlhttpRequest
+// @connect      *
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -44,13 +46,34 @@
     return librariesPromise;
   }
 
+  // Plain fetch() can't read cross-origin image bytes unless the origin
+  // opts in with Access-Control-Allow-Origin — which most image CDNs don't
+  // send, since that header is for script-readability, not <img> display.
+  // GM_xmlhttpRequest is a privileged Tampermonkey API that bypasses that
+  // restriction entirely (the standard way userscripts fetch cross-origin
+  // resources), using the browser's real network stack — same UA and
+  // cookies a normal page load would send. Referer isn't sent automatically
+  // though, so it's set explicitly for CDNs that hotlink-check on it.
+  function gmFetchBlob(url) {
+    return new Promise((resolve, reject) => {
+      GM_xmlhttpRequest({
+        method: 'GET',
+        url,
+        responseType: 'blob',
+        headers: { Referer: location.href },
+        onload: res => (res.status >= 200 && res.status < 300) ? resolve(res.response) : reject(new Error(`HTTP ${res.status}`)),
+        onerror: () => reject(new Error('network error')),
+      });
+    });
+  }
+
   // Downloads every remote <img> in contentHtml from the browser (so it goes
   // out with the same cookies/UA/referrer that already got the page itself
   // past any bot-blocking) and packs them into a zip, rewriting each src to
   // its path inside that zip. This makes the images available to EPUB export
   // later even if the server can't reach the origin site directly. Images
-  // that fail to fetch (e.g. no CORS header on the response) are left as
-  // remote URLs, same as before this feature existed.
+  // that fail to fetch are left as remote URLs, same as before this feature
+  // existed.
   async function buildAssetsZip(contentHtml) {
     await ensureLibraries();
     const wrapper = document.createElement('div');
@@ -62,16 +85,14 @@
       const src = img.getAttribute('src');
       if (!src || !/^https?:/i.test(src)) continue;
       try {
-        const res = await fetch(src);
-        if (!res.ok) continue;
-        const blob = await res.blob();
+        const blob = await gmFetchBlob(src);
         const ext = (blob.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg').split('+')[0];
         const name = `images/${count}.${ext}`;
         zip.file(name, blob);
         img.setAttribute('src', name);
         count++;
       } catch {
-        // CORS-blocked or network error — leave the original remote src.
+        // Still failed even bypassing CORS (dead link, real block, etc.) — leave the original remote src.
       }
     }
 

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"archive/zip"
+	"bytes"
 	"database/sql"
 	_ "embed"
 	"encoding/json"
@@ -55,6 +57,7 @@ func main() {
 
 	e.GET("/", s.handleIndex)
 	e.GET("/articles/:id", s.handleReaderPage)
+	e.GET("/articles/:id/assets/*", s.handleArticleAsset)
 	e.POST("/articles/epub", s.handleEPUB)
 	e.GET("/readone.user.js", serveUserscript)
 
@@ -101,8 +104,36 @@ func (s *server) handleReaderPage(c echo.Context) error {
 		"Byline":   a.Byline,
 		"SiteName": a.SiteName,
 		"URL":      a.URL,
-		"Content":  template.HTML(a.ContentHTML),
+		"Content":  template.HTML(rewriteAssetPaths(a.ContentHTML, a.ID)),
 	})
+}
+
+// handleArticleAsset serves a single file out of an article's bundled assets
+// zip (see rewriteAssetPaths), e.g. GET /articles/2/assets/images/0.jpg.
+func (s *server) handleArticleAsset(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid article id")
+	}
+	name := c.Param("*")
+
+	articles, err := getArticlesByIDs(s.db, []int64{id})
+	if err != nil {
+		return err
+	}
+	if len(articles) == 0 || len(articles[0].Assets) == 0 {
+		return echo.NewHTTPError(http.StatusNotFound, "asset not found")
+	}
+
+	zr, err := zip.NewReader(bytes.NewReader(articles[0].Assets), int64(len(articles[0].Assets)))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "corrupt assets archive")
+	}
+	data, ok := readZipEntry(zr, name)
+	if !ok {
+		return echo.NewHTTPError(http.StatusNotFound, "asset not found")
+	}
+	return c.Blob(http.StatusOK, http.DetectContentType(data), data)
 }
 
 func (s *server) handleListArticles(c echo.Context) error {
