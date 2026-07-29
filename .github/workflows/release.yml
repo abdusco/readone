@@ -6,7 +6,7 @@ on:
       - "v*"
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 env:
@@ -48,3 +48,43 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+  release:
+    needs: docker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          chmod +x .github/generate_changelog.sh
+          current_tag="${{ github.ref_name }}"
+          previous_tag=$(git tag --sort=-creatordate | awk -v cur="$current_tag" 'found { print; exit } $0 == cur { found=1 }')
+
+          if [ -n "$previous_tag" ]; then
+            range="${previous_tag}..${current_tag}"
+          else
+            range="$current_tag"
+          fi
+
+          version="${current_tag#v}"
+          image="${REGISTRY}/${IMAGE_NAME}:${version}"
+          package_url="https://github.com/${IMAGE_NAME}/pkgs/container/readone?tag=${version}"
+
+          {
+            echo "changelog<<EOF"
+            .github/generate_changelog.sh "$range" "$image" "$package_url"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          draft: true
+          body: ${{ steps.changelog.outputs.changelog }}
