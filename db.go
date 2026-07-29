@@ -46,18 +46,46 @@ func openDB(path string) (*sql.DB, error) {
 		db.Close()
 		return nil, err
 	}
+	// De-dupe any rows saved before the URL uniqueness constraint existed,
+	// keeping the most recently inserted row per URL, so the index below
+	// can always be created.
+	if _, err := db.Exec(`DELETE FROM articles WHERE id NOT IN (SELECT MAX(id) FROM articles GROUP BY url)`); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if _, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_articles_url ON articles(url)`); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return db, nil
 }
 
+// insertArticle upserts by URL: saving an already-saved URL again replaces
+// its title/byline/content/assets and bumps created_at, rather than creating
+// a duplicate row.
 func insertArticle(db *sql.DB, a Article) (int64, error) {
-	res, err := db.Exec(
-		`INSERT INTO articles (title, byline, site_name, url, content_html, assets) VALUES (?, ?, ?, ?, ?, ?)`,
+	_, err := db.Exec(
+		`INSERT INTO articles (title, byline, site_name, url, content_html, assets)
+		 VALUES (?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(url) DO UPDATE SET
+		   title        = excluded.title,
+		   byline       = excluded.byline,
+		   site_name    = excluded.site_name,
+		   content_html = excluded.content_html,
+		   assets       = excluded.assets,
+		   created_at   = strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
 		a.Title, a.Byline, a.SiteName, a.URL, a.ContentHTML, a.Assets,
 	)
 	if err != nil {
 		return 0, err
 	}
-	return res.LastInsertId()
+	// LastInsertId() isn't reliably updated on the DO UPDATE branch of an
+	// upsert, so look the row up by its unique URL instead.
+	var id int64
+	if err := db.QueryRow(`SELECT id FROM articles WHERE url = ?`, a.URL).Scan(&id); err != nil {
+		return 0, err
+	}
+	return id, nil
 }
 
 // listArticles deliberately omits the assets blob — it can be large and the
