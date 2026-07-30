@@ -23,6 +23,11 @@
       <span x-show="!exporting">⬇ Download selected as EPUB (<span x-text="selected.length"></span>)</span>
       <span x-show="exporting">Building EPUB…</span>
     </button>
+    <span class="spacer"></span>
+    <button class="danger" x-on:click="deleteSelected()" x-bind:disabled="selected.length === 0 || deleting">
+      <span x-show="!deleting">🗑 Delete selected (<span x-text="selected.length"></span>)</span>
+      <span x-show="deleting">Deleting…</span>
+    </button>
   </div>
 
   <div class="table-wrap">
@@ -59,6 +64,7 @@
         importUrlValue: '',
         importing: false,
         exporting: false,
+        deleting: false,
         error: '',
 
         async init() {
@@ -114,6 +120,23 @@
             this.error = `EPUB export failed: ${e.message}`;
           } finally {
             this.exporting = false;
+          }
+        },
+
+        async deleteSelected() {
+          if (!confirm(`Delete ${this.selected.length} selected article(s)? This cannot be undone.`)) return;
+          this.error = '';
+          this.deleting = true;
+          try {
+            const results = await Promise.allSettled(
+              this.selected.map(id => fetch(`/api/articles/${id}`, { method: 'DELETE' }))
+            );
+            const failed = results.some(r => r.status === 'rejected' || !r.value.ok);
+            if (failed) this.error = 'Some articles failed to delete.';
+            this.selected = [];
+            await this.refresh();
+          } finally {
+            this.deleting = false;
           }
         },
       };

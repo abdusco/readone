@@ -117,6 +117,12 @@ func listArticles(db *sql.DB) ([]Article, error) {
 	return out, rows.Err()
 }
 
+// deleteArticle removes a single article by id.
+func deleteArticle(db *sql.DB, id int64) error {
+	_, err := db.Exec(`DELETE FROM articles WHERE id = ?`, id)
+	return err
+}
+
 // getArticlesByIDs includes assets since it's used for EPUB building.
 func getArticlesByIDs(db *sql.DB, ids []int64) ([]Article, error) {
 	if len(ids) == 0 {

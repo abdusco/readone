@@ -95,12 +95,13 @@ func main() {
 	api := e.Group("/api")
 	api.Use(middleware.CORSWithConfig(middleware.CORSConfig{
 		AllowOrigins: []string{"*"},
-		AllowMethods: []string{http.MethodGet, http.MethodPost},
+		AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodDelete},
 		AllowHeaders: []string{echo.HeaderContentType},
 	}))
 	api.GET("/articles", s.handleListArticles)
 	api.POST("/articles", s.handleAPIImport)
 	api.POST("/articles/import-url", s.handleImportURL)
+	api.DELETE("/articles/:id", s.handleDeleteArticle)
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -177,6 +178,17 @@ func (s *server) handleListArticles(c echo.Context) error {
 		return err
 	}
 	return c.JSON(http.StatusOK, articles)
+}
+
+func (s *server) handleDeleteArticle(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid article id")
+	}
+	if err := deleteArticle(s.db, id); err != nil {
+		return err
+	}
+	return c.NoContent(http.StatusNoContent)
 }
 
 type importURLRequest struct {
