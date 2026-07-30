@@ -91,7 +91,12 @@
       if (!src || !/^https?:/i.test(src) || assetMap[src]) continue;
       try {
         const blob = await gmFetchBlob(src);
-        const ext = (blob.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg').split('+')[0];
+        // blob.type can carry a trailing parameter (e.g. "image/jpeg;charset=utf-8")
+        // when a server sends a malformed Content-Type on an image response —
+        // strip it before deriving the extension, or the zip entry ends up
+        // named "images/0.jpg;charset=utf-8".
+        const mime = blob.type.split(';')[0].trim();
+        const ext = (mime.split('/')[1] || 'jpg').replace('jpeg', 'jpg').split('+')[0];
         const name = `images/${count}.${ext}`;
         zip.file(name, blob);
         assetMap[src] = name;
