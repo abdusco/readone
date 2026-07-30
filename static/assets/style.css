@@ -68,6 +68,7 @@ body.index h1 {
   gap: 12px;
   font-size: 24px;
   font-weight: 700;
+  line-height: 1.1;
   letter-spacing: -.02em;
   margin: 0 0 24px;
 }
@@ -172,7 +173,7 @@ body.reader { max-width: 700px; margin: 0 auto; padding: 30px 20px 80px; }
 
 body.reader .back { margin-bottom: 20px; font-family: -apple-system, sans-serif; }
 
-body.reader h1 { font-family: Georgia, serif; font-size: 32px; line-height: 1.25; margin: 0 0 4px; letter-spacing: -.01em; }
+body.reader h1 { font-family: Georgia, serif; font-size: 32px; line-height: 1.1; margin: 0 0 4px; letter-spacing: -.01em; }
 
 body.reader #meta {
   color: var(--text-muted);
