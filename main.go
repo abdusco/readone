@@ -4,7 +4,6 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
-	"database/sql"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -28,7 +27,7 @@ import (
 var staticFS embed.FS
 
 type server struct {
-	db     *sql.DB
+	repo     *Repo
 	static fs.FS
 }
 
@@ -37,11 +36,11 @@ func main() {
 	if dbPath == "" {
 		dbPath = "data.db"
 	}
-	db, err := openDB(dbPath)
+	repo, err := newRepo(dbPath)
 	if err != nil {
 		log.Fatalf("open db: %v", err)
 	}
-	defer db.Close()
+	defer repo.Close()
 
 	e := echo.New()
 	e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
@@ -64,7 +63,7 @@ func main() {
 		content = lo.Must(fs.Sub(staticFS, "static"))
 	}
 
-	s := &server{db: db, static: content}
+	s := &server{repo: repo, static: content}
 
 	e.GET("/", s.handleIndex())
 	e.GET("/articles/:id", s.handleReaderPage())
@@ -134,7 +133,7 @@ func (s *server) handleReaderPage() echo.HandlerFunc {
 		if err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid article id")
 		}
-		articles, err := getArticlesByIDs(s.db, []int64{id})
+		articles, err := s.repo.GetArticlesByIDs([]int64{id})
 		if err != nil {
 			return err
 		}
@@ -163,7 +162,7 @@ func (s *server) handleArticleAsset(c echo.Context) error {
 	}
 	name := c.Param("*")
 
-	articles, err := getArticlesByIDs(s.db, []int64{id})
+	articles, err := s.repo.GetArticlesByIDs([]int64{id})
 	if err != nil {
 		return err
 	}
@@ -183,7 +182,7 @@ func (s *server) handleArticleAsset(c echo.Context) error {
 }
 
 func (s *server) handleListArticles(c echo.Context) error {
-	articles, err := listArticles(s.db)
+	articles, err := s.repo.ListArticles()
 	if err != nil {
 		return err
 	}
@@ -195,7 +194,7 @@ func (s *server) handleDeleteArticle(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid article id")
 	}
-	if err := deleteArticle(s.db, id); err != nil {
+	if err := s.repo.DeleteArticle(id); err != nil {
 		return err
 	}
 	return c.NoContent(http.StatusNoContent)
@@ -214,7 +213,7 @@ func (s *server) handleImportURL(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadGateway, fmt.Sprintf("extract failed: %v", err))
 	}
-	id, err := insertArticle(s.db, art)
+	id, err := s.repo.InsertArticle(art)
 	if err != nil {
 		return err
 	}
@@ -258,7 +257,7 @@ func (s *server) handleAPIImport(c echo.Context) error {
 		}
 	}
 
-	id, err := insertArticle(s.db, Article{
+	id, err := s.repo.InsertArticle(Article{
 		Title:       req.Title,
 		Byline:      req.Byline,
 		SiteName:    req.SiteName,
@@ -282,7 +281,7 @@ func (s *server) handleEPUB(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "select at least one article")
 	}
 
-	articles, err := getArticlesByIDs(s.db, req.IDs)
+	articles, err := s.repo.GetArticlesByIDs(req.IDs)
 	if err != nil {
 		return err
 	}

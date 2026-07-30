@@ -40,7 +40,14 @@ CREATE TABLE IF NOT EXISTS articles (
 );
 `
 
-func openDB(path string) (*sql.DB, error) {
+// Repo wraps the sqlite connection and provides article persistence.
+type Repo struct {
+	db *sql.DB
+}
+
+// newRepo opens (creating if necessary) the sqlite database at path and
+// returns a Repo backed by it.
+func newRepo(path string) (*Repo, error) {
 	if dir := filepath.Dir(path); dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, fmt.Errorf("create db directory %s: %w", dir, err)
@@ -66,14 +73,19 @@ func openDB(path string) (*sql.DB, error) {
 		db.Close()
 		return nil, fmt.Errorf("create url unique index: %w", err)
 	}
-	return db, nil
+	return &Repo{db: db}, nil
 }
 
-// insertArticle upserts by URL: saving an already-saved URL again replaces
+// Close closes the underlying database connection.
+func (r *Repo) Close() error {
+	return r.db.Close()
+}
+
+// InsertArticle upserts by URL: saving an already-saved URL again replaces
 // its title/byline/content/assets and bumps created_at, rather than creating
 // a duplicate row.
-func insertArticle(db *sql.DB, a Article) (int64, error) {
-	_, err := db.Exec(
+func (r *Repo) InsertArticle(a Article) (int64, error) {
+	_, err := r.db.Exec(
 		`INSERT INTO articles (title, byline, site_name, url, content_html, assets)
 		 VALUES (?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(url) DO UPDATE SET
@@ -91,16 +103,16 @@ func insertArticle(db *sql.DB, a Article) (int64, error) {
 	// LastInsertId() isn't reliably updated on the DO UPDATE branch of an
 	// upsert, so look the row up by its unique URL instead.
 	var id int64
-	if err := db.QueryRow(`SELECT id FROM articles WHERE url = ?`, a.URL).Scan(&id); err != nil {
+	if err := r.db.QueryRow(`SELECT id FROM articles WHERE url = ?`, a.URL).Scan(&id); err != nil {
 		return 0, err
 	}
 	return id, nil
 }
 
-// listArticles deliberately omits the assets blob — it can be large and the
+// ListArticles deliberately omits the assets blob — it can be large and the
 // list view never needs it.
-func listArticles(db *sql.DB) ([]Article, error) {
-	rows, err := db.Query(`SELECT id, title, byline, site_name, url, content_html, created_at FROM articles ORDER BY created_at DESC`)
+func (r *Repo) ListArticles() ([]Article, error) {
+	rows, err := r.db.Query(`SELECT id, title, byline, site_name, url, content_html, created_at FROM articles ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -117,14 +129,14 @@ func listArticles(db *sql.DB) ([]Article, error) {
 	return out, rows.Err()
 }
 
-// deleteArticle removes a single article by id.
-func deleteArticle(db *sql.DB, id int64) error {
-	_, err := db.Exec(`DELETE FROM articles WHERE id = ?`, id)
+// DeleteArticle removes a single article by id.
+func (r *Repo) DeleteArticle(id int64) error {
+	_, err := r.db.Exec(`DELETE FROM articles WHERE id = ?`, id)
 	return err
 }
 
-// getArticlesByIDs includes assets since it's used for EPUB building.
-func getArticlesByIDs(db *sql.DB, ids []int64) ([]Article, error) {
+// GetArticlesByIDs includes assets since it's used for EPUB building.
+func (r *Repo) GetArticlesByIDs(ids []int64) ([]Article, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -136,7 +148,7 @@ func getArticlesByIDs(db *sql.DB, ids []int64) ([]Article, error) {
 		args[i] = id
 	}
 
-	rows, err := db.Query(query, args...)
+	rows, err := r.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
