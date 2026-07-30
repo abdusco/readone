@@ -395,9 +395,17 @@
   // before Readability ever sees them avoids the fragmentation entirely.
   // Applied recursively (top-down, re-descending into the merged node)
   // since the same pattern can repeat at nested depths.
+  //
+  // Elements whose textContent is code/CSS, not prose — a minified script or
+  // inlined stylesheet easily clears the "substantial" length bar below and
+  // gets merged into the article as if it were a real paragraph otherwise
+  // (some sites emit an analytics/preload <script> as a direct sibling of
+  // the real content divs).
+  const NON_CONTENT_TAGS = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'LINK', 'META']);
+
   function mergeFragmentedContent(root) {
     function process(el) {
-      const children = Array.from(el.children);
+      const children = Array.from(el.children).filter(c => !NON_CONTENT_TAGS.has(c.tagName));
       if (children.length >= 3) {
         const lens = children.map(c => c.textContent.trim().length);
         const substantial = children.filter((c, i) => lens[i] > 200);
@@ -411,7 +419,7 @@
           }
         }
       }
-      Array.from(el.children).forEach(process);
+      children.forEach(process);
     }
     process(root);
   }
