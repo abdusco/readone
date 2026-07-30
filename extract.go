@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	nurl "net/url"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -31,7 +31,7 @@ import (
 // (e.g. the client disconnecting) stops in-flight requests instead of
 // leaking them.
 func FetchAndExtract(ctx context.Context, rawURL string) (Article, error) {
-	pageURL, err := nurl.Parse(rawURL)
+	pageURL, err := url.Parse(rawURL)
 	if err != nil {
 		return Article{}, err
 	}
@@ -72,7 +72,7 @@ func FetchAndExtract(ctx context.Context, rawURL string) (Article, error) {
 // in document order, resolving any relative src against base (the page's own
 // URL) the same way a browser would. data: URIs and anything that isn't (or
 // doesn't resolve to) an http(s) URL are skipped.
-func extractImageURLs(doc *xhtml.Node, base *nurl.URL) []string {
+func extractImageURLs(doc *xhtml.Node, base *url.URL) []string {
 	seen := make(map[string]bool)
 	var urls []string
 	var walk func(*xhtml.Node)
@@ -102,8 +102,8 @@ func extractImageURLs(doc *xhtml.Node, base *nurl.URL) []string {
 // against base. Reports false if ref doesn't parse, is relative with no
 // base to resolve against, or resolves to something other than http(s)
 // (e.g. javascript:, mailto:).
-func resolveImageURL(base *nurl.URL, ref string) (string, bool) {
-	u, err := nurl.Parse(ref)
+func resolveImageURL(base *url.URL, ref string) (string, bool) {
+	u, err := url.Parse(ref)
 	if err != nil {
 		return "", false
 	}
