@@ -431,6 +431,12 @@
   const TRIGGER_PEEK = 14; // px visible while tucked away
   const TRIGGER_TOP_KEY = 're-trigger-top';
 
+  // Same book-with-heart mark as static/assets/logo.svg, inlined so the
+  // trigger button doesn't depend on ReadOne's server being reachable (it
+  // has to render on arbitrary third-party pages) and so its stroke can
+  // inherit the button's color via currentColor.
+  const TRIGGER_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20" /><path d="M8.62 9.8A2.25 2.25 0 1 1 12 6.836a2.25 2.25 0 1 1 3.38 2.966l-2.626 2.856a.998.998 0 0 1-1.507 0z" /></svg>`;
+
   function addTrigger() {
     const style = document.createElement('style');
     style.textContent = `
@@ -438,8 +444,9 @@
         position: fixed; left: ${TRIGGER_PEEK - TRIGGER_WIDTH}px; z-index: 2147483646;
         width: ${TRIGGER_WIDTH}px; height: ${TRIGGER_WIDTH}px; padding: 0;
         border: none; border-radius: 0 20px 20px 0;
-        background: #222; color: #fff; font-size: 18px; line-height: ${TRIGGER_WIDTH}px;
-        text-align: center; cursor: grab;
+        background: #222; color: #fff; font-size: 18px;
+        display: flex; align-items: center; justify-content: center;
+        cursor: grab;
         box-shadow: 2px 2px 8px rgba(0,0,0,.3);
         transition: left .15s ease;
         touch-action: none; user-select: none;
@@ -451,7 +458,7 @@
 
     const btn = document.createElement('button');
     btn.id = 're-trigger';
-    btn.textContent = '📖';
+    btn.innerHTML = TRIGGER_ICON_SVG;
     btn.title = 'Open Reader (drag to reposition)';
 
     const savedTop = typeof GM_getValue === 'function' ? GM_getValue(TRIGGER_TOP_KEY, null) : null;
@@ -496,7 +503,6 @@
     btn.addEventListener('click', async () => {
       if (moved) { moved = false; return; }
       btn.disabled = true;
-      const originalText = btn.textContent;
       btn.textContent = '⏳';
       try {
         const art = await extract();
@@ -507,7 +513,7 @@
         renderReaderView(art);
       } finally {
         btn.disabled = false;
-        btn.textContent = originalText;
+        btn.innerHTML = TRIGGER_ICON_SVG;
       }
     });
 
