@@ -378,6 +378,37 @@
     return art;
   }
 
+  // Some pages (notably archive.today snapshots) lay out an article's body
+  // as several sibling <div>s interleaved with empty/display:none ones
+  // (originally ad slots or embeds, stripped down but left in place). Each
+  // real content div scores independently in Readability's _grabArticle(),
+  // and the interleaving breaks its sibling-merge heuristic enough that
+  // only the highest-scoring chunk gets kept — the rest of the article is
+  // silently dropped. Collapsing each such run of siblings into one node
+  // before Readability ever sees them avoids the fragmentation entirely.
+  // Applied recursively (top-down, re-descending into the merged node)
+  // since the same pattern can repeat at nested depths.
+  function mergeFragmentedContent(root) {
+    function process(el) {
+      const children = Array.from(el.children);
+      if (children.length >= 3) {
+        const lens = children.map(c => c.textContent.trim().length);
+        const substantial = children.filter((c, i) => lens[i] > 200);
+        const trivial = children.filter((c, i) => lens[i] <= 50);
+        if (substantial.length >= 2 && substantial.length + trivial.length === children.length) {
+          const target = substantial[0];
+          for (const c of children) {
+            if (c === target) continue;
+            while (c.firstChild) target.appendChild(c.firstChild);
+            c.remove();
+          }
+        }
+      }
+      Array.from(el.children).forEach(process);
+    }
+    process(root);
+  }
+
   async function extract() {
     await ensureLibraries();
     await autoScrollFullPage();
@@ -389,6 +420,7 @@
     const lead = findLeadImage(document.body);
 
     const docClone = document.cloneNode(true);
+    mergeFragmentedContent(docClone.body);
     const reader = new unsafeWindow.Readability(docClone, { charThreshold: 100 });
     const art = reader.parse();
     return ensureLeadImage(art, lead);
