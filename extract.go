@@ -179,14 +179,6 @@ func downloadImages(ctx context.Context, urls []string) []byte {
 		return cmp.Compare(a.url, b.url)
 	})
 
-	fetched = lo.Without(fetched, nil)
-	// conc/pool doesn't guarantee result order matches submission order;
-	// sort by URL so the images/N.ext numbering is deterministic regardless
-	// of which fetch happens to finish first.
-	slices.SortFunc(fetched, func(a, b *fetchedImage) int {
-		return cmp.Compare(a.url, b.url)
-	})
-
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 	assetMap := make(map[string]string)
