@@ -30,8 +30,7 @@ needed). It adds a draggable "Reader" tab to every page that:
 
 - Extracts the article with Readability, fixing up lazy-loaded, background,
   and `<noscript>` images first so they survive extraction.
-- Lets you view it in a reader overlay, copy/download it as Markdown, or
-  save it to this server.
+- Lets you view it in a reader overlay, or save it to this server.
 - On save, downloads every remote `<img>` in the extracted content
   **from the browser** (via `GM_xmlhttpRequest`, using the page's own
   cookies/UA/referrer to get past hotlinking and bot-blocking) and bundles
