@@ -478,24 +478,46 @@
   }
 
   // Mirrors static/assets/style.css's body.reader look (same variable names
-  // and values), scoped under #re-overlay since this renders inside
-  // arbitrary third-party pages that can't be trusted to leave :root alone.
+  // and values). Rendered into a shadow root (mode: 'open') rather than
+  // plain light-DOM children of #re-overlay: this renders inside arbitrary
+  // third-party pages, and a plain div can't be trusted to resist the host
+  // page's own global CSS (a `p { ... }` or `* { ... }` rule, inherited
+  // properties like color/font cascading down from html/body, etc). Shadow
+  // DOM selector matching stops at the boundary in both directions — the
+  // page's stylesheets can't reach in, and this <style> can't leak out —
+  // and as a bonus the re-* ids below can no longer collide with ids the
+  // host page happens to use itself. `all: initial` on :host additionally
+  // blocks inherited properties (color, font-family, line-height, ...) from
+  // flowing in from the host page's ancestors, since inheritance itself
+  // (unlike selector matching) isn't stopped by the shadow boundary.
   function renderReaderView(art) {
     const overlay = document.createElement('div');
     overlay.id = 're-overlay';
-    overlay.innerHTML = `
+    const root = overlay.attachShadow({ mode: 'open' });
+    root.innerHTML = `
       <style>
-        #re-overlay {
+        /* !important throughout: the shadow boundary stops the host page's
+           selectors from reaching *into* this tree, but a page rule can
+           still match the shadow host itself (e.g. a blanket "* { color:
+           red !important }"), and that computed value is what the rest of
+           this tree would otherwise inherit. A plain (non-important)
+           declaration here can't outrank an !important one from the page,
+           so every host-level property that a hostile page could plausibly
+           force is pinned with !important too. */
+        :host {
+          all: initial !important;
           --bg: #f6f7f9; --surface: #ffffff; --border: #dde1e6; --text: #111827;
           --text-muted: #4b5563; --accent: #4f46e5; --shadow: 0 1px 2px rgba(16, 24, 40, .06);
           --radius: 10px;
-          position: fixed; inset: 0; z-index: 2147483647; overflow-y: auto;
-          background: var(--bg); color: var(--text);
-          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-          line-height: 1.5; -webkit-font-smoothing: antialiased;
+          display: block !important;
+          position: fixed !important; inset: 0 !important; z-index: 2147483647 !important; overflow-y: auto !important;
+          background: var(--bg) !important; color: var(--text) !important;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+          font-size: 16px !important;
+          line-height: 1.5 !important; -webkit-font-smoothing: antialiased;
         }
         @media (prefers-color-scheme: dark) {
-          #re-overlay {
+          :host {
             --bg: #101215; --surface: #191c22; --border: #2e323b; --text: #e5e7eb;
             --text-muted: #9aa1ad; --accent: #818cf8; --shadow: 0 1px 2px rgba(0, 0, 0, .3);
           }
@@ -519,17 +541,18 @@
         }
         #re-meta { color: var(--text-muted); font-size: 14px; margin-bottom: 24px; }
         #re-body { font-family: Georgia, serif; font-size: 18px; line-height: 1.6; }
+        #re-body p + p { margin-top: 1rem; }
         #re-body img { max-width: 100%; height: auto; display: block; margin: 12px 0; border-radius: 6px; }
         #re-body pre {
           background: var(--surface); border: 1px solid var(--border);
           border-radius: 8px; padding: 12px; overflow-x: auto;
         }
-        #re-overlay.font-sans #re-page h1, #re-overlay.font-sans #re-body {
+        :host(.font-sans) #re-page h1, :host(.font-sans) #re-body {
           font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         }
-        #re-overlay.size-s #re-body { font-size: 15px; }
-        #re-overlay.size-l #re-body { font-size: 21px; }
-        #re-overlay.width-wide #re-page { max-width: 900px; }
+        :host(.size-s) #re-body { font-size: 15px; }
+        :host(.size-l) #re-body { font-size: 21px; }
+        :host(.width-wide) #re-page { max-width: 900px; }
 
         #re-settings { position: relative; }
         #re-settings-toggle { width: 36px; height: 36px; padding: 0; justify-content: center; font-size: 15px; font-weight: 600; }
@@ -590,9 +613,9 @@
     `;
     document.body.appendChild(overlay);
 
-    overlay.querySelector('#re-close').onclick = () => overlay.remove();
+    root.querySelector('#re-close').onclick = () => overlay.remove();
     if (saveConfigured) {
-      const saveBtn = overlay.querySelector('#re-save');
+      const saveBtn = root.querySelector('#re-save');
       saveBtn.onclick = async () => {
         const original = saveBtn.textContent;
         saveBtn.disabled = true;
@@ -608,7 +631,7 @@
       };
     }
 
-    wireReaderSettings(overlay);
+    wireReaderSettings(overlay, root);
   }
 
   // Font/size/width, same three knobs as static/templates/reader.html, kept
@@ -617,7 +640,7 @@
   const READER_SETTINGS_KEY = 're-reader-settings';
   const READER_SETTINGS_DEFAULTS = { font: 'serif', size: 'm', width: 'narrow' };
 
-  function wireReaderSettings(overlay) {
+  function wireReaderSettings(overlay, root) {
     const settings = Object.assign(
       {},
       READER_SETTINGS_DEFAULTS,
@@ -629,7 +652,7 @@
       overlay.classList.toggle('size-s', settings.size === 's');
       overlay.classList.toggle('size-l', settings.size === 'l');
       overlay.classList.toggle('width-wide', settings.width === 'wide');
-      overlay.querySelectorAll('.segmented').forEach(group => {
+      root.querySelectorAll('.segmented').forEach(group => {
         const key = group.dataset.setting;
         group.querySelectorAll('button').forEach(btn => {
           btn.classList.toggle('active', btn.dataset.value === settings[key]);
@@ -637,7 +660,7 @@
       });
     }
 
-    overlay.querySelectorAll('.segmented button').forEach(btn => {
+    root.querySelectorAll('.segmented button').forEach(btn => {
       btn.addEventListener('click', () => {
         const key = btn.closest('.segmented').dataset.setting;
         settings[key] = btn.dataset.value;
@@ -646,15 +669,21 @@
       });
     });
 
-    const toggle = overlay.querySelector('#re-settings-toggle');
-    const panel = overlay.querySelector('#re-settings-panel');
+    const toggle = root.querySelector('#re-settings-toggle');
+    const panel = root.querySelector('#re-settings-panel');
     toggle.addEventListener('click', e => {
       e.stopPropagation();
       const open = panel.hasAttribute('hidden');
       if (open) panel.removeAttribute('hidden'); else panel.setAttribute('hidden', '');
       toggle.setAttribute('aria-expanded', String(open));
     });
-    overlay.addEventListener('click', e => {
+    // Listens on the shadow root, not the host overlay div: a listener on
+    // the host would see every click's e.target retargeted to the host
+    // itself (standard shadow-DOM event retargeting for listeners outside
+    // the tree the event originated in), making panel.contains(e.target)
+    // and e.target !== toggle always true and closing the panel on its own
+    // first click.
+    root.addEventListener('click', e => {
       if (!panel.hasAttribute('hidden') && !panel.contains(e.target) && e.target !== toggle) {
         panel.setAttribute('hidden', '');
         toggle.setAttribute('aria-expanded', 'false');
