@@ -5,36 +5,108 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.Title}}</title>
 <link rel="icon" type="image/svg+xml" href="/assets/logo.svg">
-<style>
-  * { box-sizing: border-box; }
-  body { font-family: Georgia, serif; max-width: 700px; margin: 0 auto; padding: 30px 20px 80px; line-height: 1.6; font-size: 18px; color: #1a1a1a; }
-  .back { display: inline-block; margin-bottom: 20px; font-family: -apple-system, sans-serif; font-size: 14px; color: #06c; text-decoration: none; }
-  h1 { font-size: 32px; margin-bottom: 4px; }
-  #meta { color: #666; font-size: 14px; margin-bottom: 24px; font-family: -apple-system, sans-serif; }
-  #meta a { color: #666; }
-  #content img { max-width: 100%; height: auto; display: block; margin: 12px 0; }
-  #content pre { background: #f5f5f5; padding: 12px; overflow-x: auto; }
-
-  @media (max-width: 480px) {
-    body { padding: 20px 16px 60px; font-size: 17px; }
-    h1 { font-size: 26px; }
-  }
-
-  @media (prefers-color-scheme: dark) {
-    body { background: #1a1a1a; color: #ddd; }
-    .back, #meta a { color: #6cb2ff; }
-    #meta { color: #999; }
-    #content pre { background: #2a2a2a; }
-  }
-</style>
+<link rel="stylesheet" href="/assets/style.css">
+<script>
+  (function () {
+    var d = document.documentElement;
+    var font = localStorage.getItem('readone.font');
+    var size = localStorage.getItem('readone.size');
+    var width = localStorage.getItem('readone.width');
+    if (font === 'sans') d.classList.add('font-sans');
+    if (size === 's') d.classList.add('size-s');
+    if (size === 'l') d.classList.add('size-l');
+    if (width === 'wide') d.classList.add('width-wide');
+  })();
+</script>
 </head>
-<body>
-  <a class="back" href="/">← All articles</a>
+<body class="reader">
+  <a class="button back" href="/">← All articles</a>
+
+  <div class="settings">
+    <button class="settings-toggle" id="settingsToggle" type="button" aria-label="Reading settings" aria-haspopup="true" aria-expanded="false">Aa</button>
+    <div class="settings-panel" id="settingsPanel" hidden>
+      <div class="settings-group">
+        <span class="settings-label">Font</span>
+        <div class="segmented" data-setting="font">
+          <button type="button" data-value="serif">Serif</button>
+          <button type="button" data-value="sans">Sans</button>
+        </div>
+      </div>
+      <div class="settings-group">
+        <span class="settings-label">Size</span>
+        <div class="segmented" data-setting="size">
+          <button type="button" data-value="s">S</button>
+          <button type="button" data-value="m">M</button>
+          <button type="button" data-value="l">L</button>
+        </div>
+      </div>
+      <div class="settings-group">
+        <span class="settings-label">Width</span>
+        <div class="segmented" data-setting="width">
+          <button type="button" data-value="narrow">Narrow</button>
+          <button type="button" data-value="wide">Wide</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <h1>{{.Title}}</h1>
   <div id="meta">
     {{if .Byline}}{{.Byline}}{{if .SiteName}} · {{end}}{{end}}{{.SiteName}}
     {{if or .Byline .SiteName}} · {{end}}<a href="{{.URL}}" target="_blank">View original</a>
   </div>
   <div id="content">{{.Content}}</div>
+
+  <script>
+    (function () {
+      var defaults = { font: 'serif', size: 'm', width: 'narrow' };
+      var settings = {};
+      for (var key in defaults) {
+        settings[key] = localStorage.getItem('readone.' + key) || defaults[key];
+      }
+
+      var root = document.documentElement;
+      var toggle = document.getElementById('settingsToggle');
+      var panel = document.getElementById('settingsPanel');
+
+      function apply() {
+        root.classList.toggle('font-sans', settings.font === 'sans');
+        root.classList.toggle('size-s', settings.size === 's');
+        root.classList.toggle('size-l', settings.size === 'l');
+        root.classList.toggle('width-wide', settings.width === 'wide');
+
+        document.querySelectorAll('.segmented').forEach(function (group) {
+          var key = group.dataset.setting;
+          group.querySelectorAll('button').forEach(function (btn) {
+            btn.classList.toggle('active', btn.dataset.value === settings[key]);
+          });
+        });
+      }
+
+      document.querySelectorAll('.segmented button').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var key = btn.closest('.segmented').dataset.setting;
+          settings[key] = btn.dataset.value;
+          localStorage.setItem('readone.' + key, btn.dataset.value);
+          apply();
+        });
+      });
+
+      toggle.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var open = panel.hasAttribute('hidden');
+        if (open) panel.removeAttribute('hidden'); else panel.setAttribute('hidden', '');
+        toggle.setAttribute('aria-expanded', String(open));
+      });
+      document.addEventListener('click', function (e) {
+        if (!panel.hasAttribute('hidden') && !panel.contains(e.target) && e.target !== toggle) {
+          panel.setAttribute('hidden', '');
+          toggle.setAttribute('aria-expanded', 'false');
+        }
+      });
+
+      apply();
+    })();
+  </script>
 </body>
 </html>
