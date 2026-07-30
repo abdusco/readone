@@ -69,6 +69,37 @@
     });
   }
 
+  // Finds the live, already-loaded <img> in the real document matching src
+  // (the wrapper buildImageAssets iterates over is a detached clone parsed
+  // from contentHtml — its <img> elements were never actually loaded), and
+  // re-encodes its already-decoded pixels as a PNG via canvas. This is the
+  // fallback for images gmFetchBlob can't fetch (some sites' bot mitigation
+  // blocks XHR-style requests for a resource that loaded fine as a normal
+  // on-page <img>) — no network request needed, since the browser already
+  // has the pixels for display. It only works if the canvas isn't
+  // "tainted": same-origin images are always fine; cross-origin images need
+  // the origin to send permissive CORS headers, which the ones blocking
+  // gmFetchBlob typically don't, so this is best-effort on top of
+  // best-effort. Static PNG only — an animated GIF/WebP loses its animation,
+  // since canvas only ever holds the currently-displayed frame.
+  async function canvasCaptureBlob(src) {
+    const img = Array.from(document.images).find(el => el.currentSrc === src || el.src === src);
+    if (!img || !img.complete || !img.naturalWidth) return null;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    canvas.getContext('2d').drawImage(img, 0, 0);
+
+    try {
+      return await new Promise((resolve, reject) => {
+        canvas.toBlob(blob => (blob ? resolve(blob) : reject(new Error('empty canvas blob'))));
+      });
+    } catch {
+      return null; // tainted canvas (cross-origin image without permissive CORS) — nothing more we can do
+    }
+  }
+
   // Downloads every remote <img> in contentHtml from the browser (so it goes
   // out with the same cookies/UA/referrer that already got the page itself
   // past any bot-blocking) and packs them into a zip, alongside a map.json
@@ -76,8 +107,9 @@
   // mapping to rewrite <img src> itself, so this leaves contentHtml
   // untouched — the zip is the only thing that knows about local paths. This
   // makes the images available to EPUB export later even if the server can't
-  // reach the origin site directly. Images that fail to fetch are simply
-  // left out of the mapping, same as before this feature existed.
+  // reach the origin site directly. Images that fail to fetch (and can't be
+  // canvas-captured either) are simply left out of the mapping, same as
+  // before this feature existed.
   async function buildImageAssets(contentHtml) {
     await ensureLibraries();
     const wrapper = document.createElement('div');
@@ -89,21 +121,25 @@
     for (const img of wrapper.querySelectorAll('img')) {
       const src = img.getAttribute('src');
       if (!src || !/^https?:/i.test(src) || assetMap[src]) continue;
+
+      let blob = null;
       try {
-        const blob = await gmFetchBlob(src);
-        // blob.type can carry a trailing parameter (e.g. "image/jpeg;charset=utf-8")
-        // when a server sends a malformed Content-Type on an image response —
-        // strip it before deriving the extension, or the zip entry ends up
-        // named "images/0.jpg;charset=utf-8".
-        const mime = blob.type.split(';')[0].trim();
-        const ext = (mime.split('/')[1] || 'jpg').replace('jpeg', 'jpg').split('+')[0];
-        const name = `images/${count}.${ext}`;
-        zip.file(name, blob);
-        assetMap[src] = name;
-        count++;
+        blob = await gmFetchBlob(src);
       } catch {
-        // Still failed even bypassing CORS (dead link, real block, etc.) — leave the original remote src.
+        blob = await canvasCaptureBlob(src);
       }
+      if (!blob) continue; // both the direct fetch and the canvas fallback failed — leave the original remote src
+
+      // blob.type can carry a trailing parameter (e.g. "image/jpeg;charset=utf-8")
+      // when a server sends a malformed Content-Type on an image response —
+      // strip it before deriving the extension, or the zip entry ends up
+      // named "images/0.jpg;charset=utf-8".
+      const mime = blob.type.split(';')[0].trim();
+      const ext = (mime.split('/')[1] || 'jpg').replace('jpeg', 'jpg').split('+')[0];
+      const name = `images/${count}.${ext}`;
+      zip.file(name, blob);
+      assetMap[src] = name;
+      count++;
     }
 
     if (count === 0) return { assetsZip: null };
