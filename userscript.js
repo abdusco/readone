@@ -409,6 +409,30 @@
     process(root);
   }
 
+  // Readability's own boilerplate cleanup can strip an <li>'s children
+  // without removing the <li> itself (e.g. a "Recommended Reading" list
+  // reduced to `<li></li><li></li>`), or strip every <li> out of a list
+  // without removing the now-empty <ul>/<ol> wrapper. Both just render as
+  // stray blank space. Runs bottom-up so emptiness cascades correctly (an
+  // <li> containing only an empty nested list is itself empty).
+  function stripEmptyLists(html) {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const mediaSelector = 'img, picture, video, audio, iframe, svg';
+    function hasMeaningfulContent(el) {
+      return el.textContent.trim() !== '' || !!el.querySelector(mediaSelector);
+    }
+    function process(el) {
+      Array.from(el.children).forEach(process);
+      if (el.tagName === 'LI' && !hasMeaningfulContent(el)) {
+        el.remove();
+      } else if ((el.tagName === 'UL' || el.tagName === 'OL') && !el.querySelector(':scope > li')) {
+        el.remove();
+      }
+    }
+    process(doc.body);
+    return doc.body.innerHTML;
+  }
+
   async function extract() {
     await ensureLibraries();
     await autoScrollFullPage();
@@ -423,6 +447,7 @@
     mergeFragmentedContent(docClone.body);
     const reader = new unsafeWindow.Readability(docClone, { charThreshold: 100 });
     const art = reader.parse();
+    if (art) art.content = stripEmptyLists(art.content);
     return ensureLeadImage(art, lead);
   }
 

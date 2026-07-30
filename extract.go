@@ -47,7 +47,16 @@ func FetchAndExtract(ctx context.Context, rawURL string) (Article, error) {
 	if err := art.RenderHTML(&buf); err != nil {
 		return Article{}, err
 	}
-	contentHTML := buf.String()
+
+	parsed, err := transformHTML(buf.String(), stripEmptyListsTransform)
+	if err != nil {
+		return Article{}, err
+	}
+	imageURLs := extractImageURLs(parsed, pageURL)
+	contentHTML, err := renderBody(parsed)
+	if err != nil {
+		return Article{}, err
+	}
 
 	return Article{
 		Title:       art.Title(),
@@ -55,20 +64,15 @@ func FetchAndExtract(ctx context.Context, rawURL string) (Article, error) {
 		SiteName:    art.SiteName(),
 		URL:         pageURL.String(),
 		ContentHTML: contentHTML,
-		Assets:      downloadImages(ctx, extractImageURLs(contentHTML, pageURL)),
+		Assets:      downloadImages(ctx, imageURLs),
 	}, nil
 }
 
-// extractImageURLs collects the distinct http(s) <img src> values in
-// contentHTML, in document order, resolving any relative src against base
-// (the page's own URL) the same way a browser would. data: URIs and
-// anything that isn't (or doesn't resolve to) an http(s) URL are skipped.
-func extractImageURLs(contentHTML string, base *nurl.URL) []string {
-	doc, err := xhtml.Parse(strings.NewReader(contentHTML))
-	if err != nil {
-		return nil
-	}
-
+// extractImageURLs collects the distinct http(s) <img src> values under doc,
+// in document order, resolving any relative src against base (the page's own
+// URL) the same way a browser would. data: URIs and anything that isn't (or
+// doesn't resolve to) an http(s) URL are skipped.
+func extractImageURLs(doc *xhtml.Node, base *nurl.URL) []string {
 	seen := make(map[string]bool)
 	var urls []string
 	var walk func(*xhtml.Node)
@@ -114,6 +118,76 @@ func resolveImageURL(base *nurl.URL, ref string) (string, bool) {
 		return "", false
 	}
 	return resolved.String(), true
+}
+
+// mediaTags are element names whose presence alone (even with no text)
+// counts as meaningful content for hasMeaningfulContent.
+var mediaTags = map[string]bool{"img": true, "picture": true, "video": true, "audio": true, "iframe": true, "svg": true}
+
+// stripEmptyLists removes <li> elements with no real content and any
+// <ul>/<ol> left with no <li> children as a result. Byproducts of
+// Readability's own boilerplate cleanup: it strips a list item's children
+// without removing the item, and strips every item without removing the
+// now-empty wrapper.
+func stripEmptyLists(contentHTML string) string {
+	return transformHTMLString(contentHTML, stripEmptyListsTransform)
+}
+
+// stripEmptyListsTransform is stripEmptyLists as a transformHTML step.
+// Processed bottom-up so emptiness cascades correctly (an <li> containing
+// only an empty nested list is itself empty, which can in turn empty its
+// parent list).
+func stripEmptyListsTransform(doc *xhtml.Node) {
+	var walk func(*xhtml.Node)
+	walk = func(n *xhtml.Node) {
+		for c := n.FirstChild; c != nil; {
+			next := c.NextSibling
+			walk(c)
+			c = next
+		}
+		if n.Type != xhtml.ElementNode || n.Parent == nil {
+			return
+		}
+		switch n.Data {
+		case "li":
+			if !hasMeaningfulContent(n) {
+				n.Parent.RemoveChild(n)
+			}
+		case "ul", "ol":
+			if !hasElementChild(n, "li") {
+				n.Parent.RemoveChild(n)
+			}
+		}
+	}
+	walk(doc)
+}
+
+// hasMeaningfulContent reports whether n's subtree has any non-whitespace
+// text or a media element (which can be meaningful with no text at all).
+func hasMeaningfulContent(n *xhtml.Node) bool {
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		switch c.Type {
+		case xhtml.TextNode:
+			if strings.TrimSpace(c.Data) != "" {
+				return true
+			}
+		case xhtml.ElementNode:
+			if mediaTags[c.Data] || hasMeaningfulContent(c) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// hasElementChild reports whether n has a direct child element named tag.
+func hasElementChild(n *xhtml.Node, tag string) bool {
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		if c.Type == xhtml.ElementNode && c.Data == tag {
+			return true
+		}
+	}
+	return false
 }
 
 const (

@@ -27,10 +27,11 @@ func BuildEPUB(articles []Article) (io.WriterTo, error) {
 	book := epub.NewEpub(title)
 
 	for i, a := range articles {
-		body, err := embedImages(book, resolvedHTMLFor(a), a.Assets, i)
-		if err != nil {
-			return nil, fmt.Errorf("article %d (%s): %w", a.ID, a.Title, err)
-		}
+		body := transformHTMLString(a.ContentHTML,
+			resolveAssetPathsTransform(a),
+			stripEmptyListsTransform,
+			embedImagesTransform(book, assetsZipReader(a.Assets), i),
+		)
 
 		header := fmt.Sprintf(`<p><em>%s</em></p><p><a href="%s">%s</a></p>`,
 			html.EscapeString(strings.Join(nonEmpty(a.Byline, a.SiteName), " · ")),
@@ -54,52 +55,26 @@ func nonEmpty(vals ...string) []string {
 	return out
 }
 
-// embedImages walks contentHTML and embeds every <img> into the EPUB,
-// rewriting its src to the internal path go-epub returns, then re-serializes
-// the HTML. Images the userscript already bundled into assetsZip (referenced
-// by relative path, e.g. "images/0.jpg") are read straight from the zip;
-// anything else falls back to fetching the remote URL directly, which is the
-// only option for articles imported by URL (no browser involved).
-func embedImages(book *epub.Epub, contentHTML string, assetsZip []byte, articleIdx int) (string, error) {
-	var zr *zip.Reader
-	if len(assetsZip) > 0 {
-		if r, err := zip.NewReader(bytes.NewReader(assetsZip), int64(len(assetsZip))); err == nil {
-			zr = r
-		}
-	}
-
+// transformHTML parses contentHTML once and runs each transform over the
+// resulting tree in order, so a caller needing the tree itself afterward
+// (e.g. to extract <img> URLs) doesn't have to parse contentHTML again.
+func transformHTML(contentHTML string, transforms ...func(*xhtml.Node)) (*xhtml.Node, error) {
 	doc, err := xhtml.Parse(strings.NewReader(contentHTML))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-
-	imgIdx := 0
-	var walk func(*xhtml.Node)
-	walk = func(n *xhtml.Node) {
-		if n.Type == xhtml.ElementNode && n.Data == "img" {
-			for i, attr := range n.Attr {
-				if attr.Key != "src" {
-					continue
-				}
-				internalPath, ok := embedOneImage(book, zr, attr.Val, articleIdx, imgIdx)
-				if !ok {
-					continue
-				}
-				imgIdx++
-				n.Attr[i].Val = internalPath
-			}
-		}
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			walk(c)
-		}
+	for _, t := range transforms {
+		t(doc)
 	}
-	walk(doc)
+	return doc, nil
+}
 
+// renderBody re-serializes doc's <body> children back to an HTML string.
+func renderBody(doc *xhtml.Node) (string, error) {
 	body := findNode(doc, "body")
 	if body == nil {
-		return contentHTML, nil
+		return "", fmt.Errorf("no <body> in document")
 	}
-
 	var buf bytes.Buffer
 	for c := body.FirstChild; c != nil; c = c.NextSibling {
 		if err := xhtml.Render(&buf, c); err != nil {
@@ -107,6 +82,75 @@ func embedImages(book *epub.Epub, contentHTML string, assetsZip []byte, articleI
 		}
 	}
 	return buf.String(), nil
+}
+
+// transformHTMLString is transformHTML for callers that just want the
+// resulting HTML string, falling back to contentHTML unchanged if parsing
+// or re-rendering fails.
+func transformHTMLString(contentHTML string, transforms ...func(*xhtml.Node)) string {
+	doc, err := transformHTML(contentHTML, transforms...)
+	if err != nil {
+		return contentHTML
+	}
+	rendered, err := renderBody(doc)
+	if err != nil {
+		return contentHTML
+	}
+	return rendered
+}
+
+// walkImgSrc visits every <img> under doc, replacing its src with whatever
+// rewrite returns when it reports a match.
+func walkImgSrc(doc *xhtml.Node, rewrite func(src string) (string, bool)) {
+	var walk func(*xhtml.Node)
+	walk = func(n *xhtml.Node) {
+		if n.Type == xhtml.ElementNode && n.Data == "img" {
+			for i, attr := range n.Attr {
+				if attr.Key != "src" {
+					continue
+				}
+				if newSrc, ok := rewrite(attr.Val); ok {
+					n.Attr[i].Val = newSrc
+				}
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			walk(c)
+		}
+	}
+	walk(doc)
+}
+
+// assetsZipReader opens assetsZip, returning nil if it's empty or invalid.
+func assetsZipReader(assetsZip []byte) *zip.Reader {
+	if len(assetsZip) == 0 {
+		return nil
+	}
+	zr, err := zip.NewReader(bytes.NewReader(assetsZip), int64(len(assetsZip)))
+	if err != nil {
+		return nil
+	}
+	return zr
+}
+
+// embedImagesTransform embeds every <img> into the EPUB, rewriting its src to
+// the internal path go-epub returns. Images the userscript already bundled
+// into assets (referenced by relative path, e.g. "images/0.jpg") are read
+// straight from the zip; anything else falls back to fetching the remote URL
+// directly, which is the only option for articles imported by URL (no
+// browser involved).
+func embedImagesTransform(book *epub.Epub, zr *zip.Reader, articleIdx int) func(*xhtml.Node) {
+	imgIdx := 0
+	return func(doc *xhtml.Node) {
+		walkImgSrc(doc, func(src string) (string, bool) {
+			internalPath, ok := embedOneImage(book, zr, src, articleIdx, imgIdx)
+			if !ok {
+				return "", false
+			}
+			imgIdx++
+			return internalPath, true
+		})
+	}
 }
 
 // embedOneImage embeds a single image, preferring the bundled zip asset (if
@@ -138,61 +182,23 @@ func embedOneImage(book *epub.Epub, zr *zip.Reader, src string, articleIdx, imgI
 	return internalPath, true
 }
 
-// rewriteAssetPaths rewrites <img src="images/0.jpg">-style relative paths
-// (left in place by the userscript's zip-asset bundling) into an absolute
-// URL the browser can actually fetch, for rendering the article outside of
-// EPUB export (the reader page, currently). Those relative paths only ever
-// resolved to anything inside the zip go-epub embeds them from — on their
-// own they're not servable, which is why images broke on the reader page
-// once asset bundling shipped.
-func rewriteAssetPaths(contentHTML string, articleID int64) string {
+// rewriteAssetPathsTransform rewrites <img src="images/0.jpg">-style relative
+// paths (left in place by the userscript's zip-asset bundling) into an
+// absolute URL the browser can actually fetch, for rendering the article
+// outside of EPUB export (the reader page, currently). Those relative paths
+// only ever resolved to anything inside the zip go-epub embeds them from —
+// on their own they're not servable, which is why images broke on the reader
+// page once asset bundling shipped.
+func rewriteAssetPathsTransform(articleID int64) func(*xhtml.Node) {
 	prefix := fmt.Sprintf("/articles/%d/assets/", articleID)
-	return rewriteImgSrc(contentHTML, func(src string) (string, bool) {
-		if strings.HasPrefix(src, "http") || strings.HasPrefix(src, "/") || strings.HasPrefix(src, "data:") {
-			return "", false
-		}
-		return prefix + src, true
-	})
-}
-
-// rewriteImgSrc walks contentHTML's <img> tags, replacing src with whatever
-// rewrite returns when it reports a match, and re-serializes the result.
-// contentHTML is returned unchanged if it fails to parse.
-func rewriteImgSrc(contentHTML string, rewrite func(src string) (string, bool)) string {
-	doc, err := xhtml.Parse(strings.NewReader(contentHTML))
-	if err != nil {
-		return contentHTML
-	}
-
-	var walk func(*xhtml.Node)
-	walk = func(n *xhtml.Node) {
-		if n.Type == xhtml.ElementNode && n.Data == "img" {
-			for i, attr := range n.Attr {
-				if attr.Key != "src" {
-					continue
-				}
-				if newSrc, ok := rewrite(attr.Val); ok {
-					n.Attr[i].Val = newSrc
-				}
+	return func(doc *xhtml.Node) {
+		walkImgSrc(doc, func(src string) (string, bool) {
+			if strings.HasPrefix(src, "http") || strings.HasPrefix(src, "/") || strings.HasPrefix(src, "data:") {
+				return "", false
 			}
-		}
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			walk(c)
-		}
+			return prefix + src, true
+		})
 	}
-	walk(doc)
-
-	body := findNode(doc, "body")
-	if body == nil {
-		return contentHTML
-	}
-	var buf bytes.Buffer
-	for c := body.FirstChild; c != nil; c = c.NextSibling {
-		if err := xhtml.Render(&buf, c); err != nil {
-			return contentHTML
-		}
-	}
-	return buf.String()
 }
 
 // readAssetMap reads the optional map.json entry an assets zip may contain,
@@ -212,26 +218,28 @@ func readAssetMap(zr *zip.Reader) map[string]string {
 	return m
 }
 
-// resolvedHTMLFor returns a.ContentHTML with any <img src> that the assets
-// zip's map.json knows about rewritten to its zip-relative path, so the
-// existing rewriteAssetPaths (reader page) / embedImages (EPUB) logic can
-// pick it up exactly as if the userscript had baked the path in itself.
-func resolvedHTMLFor(a Article) string {
-	if len(a.Assets) == 0 {
-		return a.ContentHTML
+// resolveAssetPathsTransform rewrites any <img src> that a.Assets' map.json
+// knows about to its zip-relative path, so rewriteAssetPathsTransform
+// (reader page) / embedImagesTransform (EPUB) can pick it up exactly as if
+// the userscript had baked the path in itself.
+func resolveAssetPathsTransform(a Article) func(*xhtml.Node) {
+	return func(doc *xhtml.Node) {
+		if len(a.Assets) == 0 {
+			return
+		}
+		zr := assetsZipReader(a.Assets)
+		if zr == nil {
+			return
+		}
+		assetMap := readAssetMap(zr)
+		if len(assetMap) == 0 {
+			return
+		}
+		walkImgSrc(doc, func(src string) (string, bool) {
+			p, ok := assetMap[src]
+			return p, ok
+		})
 	}
-	zr, err := zip.NewReader(bytes.NewReader(a.Assets), int64(len(a.Assets)))
-	if err != nil {
-		return a.ContentHTML
-	}
-	assetMap := readAssetMap(zr)
-	if len(assetMap) == 0 {
-		return a.ContentHTML
-	}
-	return rewriteImgSrc(a.ContentHTML, func(src string) (string, bool) {
-		p, ok := assetMap[src]
-		return p, ok
-	})
 }
 
 func readZipEntry(zr *zip.Reader, name string) ([]byte, bool) {

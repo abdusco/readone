@@ -181,7 +181,74 @@ func TestExtractImageURLs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, extractImageURLs(tt.contentHTML, tt.base))
+			doc, err := transformHTML(tt.contentHTML)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, extractImageURLs(doc, tt.base))
+		})
+	}
+}
+
+func TestStripEmptyLists(t *testing.T) {
+	tests := []struct {
+		name        string
+		contentHTML string
+		want        string
+	}{
+		{
+			name:        "no lists",
+			contentHTML: `<p>just text</p>`,
+			want:        `<p>just text</p>`,
+		},
+		{
+			name:        "non-empty list untouched",
+			contentHTML: `<ul><li>a</li><li>b</li></ul>`,
+			want:        `<ul><li>a</li><li>b</li></ul>`,
+		},
+		{
+			name:        "empty ul removed",
+			contentHTML: `<p>before</p><ul></ul><p>after</p>`,
+			want:        `<p>before</p><p>after</p>`,
+		},
+		{
+			name:        "empty ol removed",
+			contentHTML: `<ol></ol><p>text</p>`,
+			want:        `<p>text</p>`,
+		},
+		{
+			name:        "list with only whitespace text removed",
+			contentHTML: `<ul>   </ul>`,
+			want:        ``,
+		},
+		{
+			name:        "nested empty list removed leaving outer empty too",
+			contentHTML: `<ul><ul></ul></ul><p>text</p>`,
+			want:        `<p>text</p>`,
+		},
+		{
+			name:        "list of empty li elements removed",
+			contentHTML: `<section><h2>Recommended Reading</h2><ul><li></li><li></li><li></li></ul></section>`,
+			want:        `<section><h2>Recommended Reading</h2></section>`,
+		},
+		{
+			name:        "li with only whitespace removed",
+			contentHTML: `<ul><li>  </li></ul>`,
+			want:        ``,
+		},
+		{
+			name:        "li with text kept, empty siblings removed",
+			contentHTML: `<ul><li></li><li>real item</li><li></li></ul>`,
+			want:        `<ul><li>real item</li></ul>`,
+		},
+		{
+			name:        "li with only an image is kept",
+			contentHTML: `<ul><li><img src="a.jpg"></li></ul>`,
+			want:        `<ul><li><img src="a.jpg"/></li></ul>`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, stripEmptyLists(tt.contentHTML))
 		})
 	}
 }

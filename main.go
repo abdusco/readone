@@ -27,7 +27,7 @@ import (
 var staticFS embed.FS
 
 type server struct {
-	repo     *Repo
+	repo   *Repo
 	static fs.FS
 }
 
@@ -148,7 +148,11 @@ func (s *server) handleReaderPage() echo.HandlerFunc {
 			"Byline":   a.Byline,
 			"SiteName": a.SiteName,
 			"URL":      a.URL,
-			"Content":  template.HTML(rewriteAssetPaths(resolvedHTMLFor(a), a.ID)),
+			"Content": template.HTML(transformHTMLString(a.ContentHTML,
+				resolveAssetPathsTransform(a),
+				stripEmptyListsTransform,
+				rewriteAssetPathsTransform(a.ID),
+			)),
 		})
 	}
 }
