@@ -231,6 +231,9 @@ func (s *server) handleAPIImport(c echo.Context) error {
 		if assets, err = io.ReadAll(f); err != nil {
 			return err
 		}
+		if _, err := zip.NewReader(bytes.NewReader(assets), int64(len(assets))); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "assets is not a valid zip archive")
+		}
 	}
 
 	id, err := insertArticle(s.db, Article{
