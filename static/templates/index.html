@@ -9,7 +9,10 @@
 <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </head>
 <body class="index" x-data="app()" x-init="init()">
-  <h1><img src="/assets/logo.svg" alt=""> ReadOne</h1>
+  <h1>
+    <img src="/assets/logo.svg" alt=""> ReadOne
+    <a class="userscript-link" href="/readone.user.js" target="_blank">Install Userscript</a>
+  </h1>
 
   <form class="import" x-on:submit.prevent="importURL()">
     <input type="url" x-model="importUrlValue" placeholder="https://example.com/article" required>
@@ -18,7 +21,6 @@
   <div class="error" x-show="error" x-text="error"></div>
 
   <div class="actions">
-    <a class="button" href="/readone.user.js" target="_blank">📖 Install Userscript</a>
     <button x-on:click="downloadEpub()" x-bind:disabled="selected.length === 0 || exporting">
       <span x-show="!exporting">⬇ Download selected as EPUB (<span x-text="selected.length"></span>)</span>
       <span x-show="exporting">Building EPUB…</span>

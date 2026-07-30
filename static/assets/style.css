@@ -73,6 +73,23 @@ body.index h1 {
 }
 body.index h1 img { width: 32px; height: 32px; }
 
+body.index .userscript-link {
+  margin-left: auto;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: normal;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  text-decoration: none;
+}
+body.index .userscript-link:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--surface);
+}
+
 body.index .import { display: flex; gap: 10px; margin-bottom: 12px; }
 body.index .import input[type=url] {
   flex: 1;
@@ -144,6 +161,8 @@ body.index input[type=checkbox] {
 
 @media (max-width: 480px) {
   body.index { margin: 24px auto; }
+  body.index h1 { flex-wrap: wrap; }
+  body.index .userscript-link { margin-left: 44px; }
   body.index .import { flex-direction: column; }
 }
 
