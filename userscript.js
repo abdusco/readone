@@ -169,6 +169,21 @@
     try { return new URL(u, location.href).href; } catch { return u; }
   }
 
+  // Splitting a srcset on every "," breaks CDNs (e.g. Substack's image
+  // proxy) whose URLs embed unescaped commas in a transform-params segment,
+  // e.g. ".../fetch/$s_!x!,w_424,c_limit,f_auto/https%3A%2F%2F...png 424w".
+  // A real candidate separator is always a comma followed by whitespace;
+  // commas inside the URL itself never are. Resolving the mis-split pieces
+  // produces bogus candidate URLs that silently outrank a perfectly good
+  // src (srcset wins the browser's source-selection when both are present),
+  // which is what made affected images fail to load.
+  function resolveSrcset(srcset) {
+    return srcset.split(/,\s+/).map(part => {
+      const [u, size] = part.trim().split(/\s+/);
+      return size ? `${resolveUrl(u)} ${size}` : resolveUrl(u);
+    }).join(', ');
+  }
+
   const delay = ms => new Promise(r => setTimeout(r, ms));
 
   // archive.ph (and similar snapshot/lazy sites) populate the real image src
@@ -231,15 +246,7 @@
       if (src) img.setAttribute('src', resolveUrl(src));
 
       const srcset = img.getAttribute('srcset');
-      if (srcset) {
-        img.setAttribute(
-          'srcset',
-          srcset.split(',').map(part => {
-            const [u, size] = part.trim().split(/\s+/);
-            return size ? `${resolveUrl(u)} ${size}` : resolveUrl(u);
-          }).join(', ')
-        );
-      }
+      if (srcset) img.setAttribute('srcset', resolveSrcset(srcset));
 
       if (src && /^data:image\/(gif|svg\+xml);base64,/.test(src) && img.getAttribute('data-src')) {
         img.removeAttribute('src');
@@ -290,14 +297,7 @@
 
     root.querySelectorAll('img[srcset], source[srcset]').forEach(el => {
       const srcset = el.getAttribute('srcset');
-      if (!srcset) return;
-      el.setAttribute(
-        'srcset',
-        srcset.split(',').map(part => {
-          const [u, size] = part.trim().split(/\s+/);
-          return size ? `${resolveUrl(u)} ${size}` : resolveUrl(u);
-        }).join(', ')
-      );
+      if (srcset) el.setAttribute('srcset', resolveSrcset(srcset));
     });
   }
 
