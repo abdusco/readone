@@ -17,18 +17,15 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	"github.com/samber/lo"
 )
 
 //go:embed static
 var staticFS embed.FS
 
-var (
-	indexHTML []byte
-	readerTpl *template.Template
-)
-
 type server struct {
-	db *sql.DB
+	db     *sql.DB
+	static fs.FS
 }
 
 func main() {
@@ -41,8 +38,6 @@ func main() {
 		log.Fatalf("open db: %v", err)
 	}
 	defer db.Close()
-
-	s := &server{db: db}
 
 	e := echo.New()
 	e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
@@ -62,33 +57,18 @@ func main() {
 	if os.Getenv("DEBUG") == "1" {
 		content = os.DirFS("static")
 	} else {
-		content, err = fs.Sub(staticFS, "static")
-		if err != nil {
-			log.Fatalf("sub static fs: %v", err)
-		}
+		content = lo.Must(fs.Sub(staticFS, "static"))
 	}
 
-	if indexHTML, err = fs.ReadFile(content, "templates/index.html"); err != nil {
-		log.Fatalf("read index.html: %v", err)
-	}
-	readerHTMLSrc, err := fs.ReadFile(content, "templates/reader.html")
-	if err != nil {
-		log.Fatalf("read reader.html: %v", err)
-	}
-	readerTpl = template.Must(template.New("reader").Parse(string(readerHTMLSrc)))
+	s := &server{db: db, static: content}
 
-	assetsFS, err := fs.Sub(content, "assets")
-	if err != nil {
-		log.Fatalf("sub assets fs: %v", err)
-	}
-
-	e.GET("/", s.handleIndex)
-	e.GET("/articles/:id", s.handleReaderPage)
+	e.GET("/", s.handleIndex())
+	e.GET("/articles/:id", s.handleReaderPage())
 	e.GET("/articles/:id/assets/*", s.handleArticleAsset)
 	e.POST("/articles/epub", s.handleEPUB)
 	e.GET("/readone.user.js", serveUserscript)
 	e.GET("/robots.txt", handleRobots)
-	e.StaticFS("/assets", assetsFS)
+	e.StaticFS("/assets", lo.Must(fs.Sub(content, "assets")))
 
 	// The userscript runs on whatever article page the user is reading, so
 	// its origin can't be known in advance — allow any origin to call these.
@@ -116,32 +96,40 @@ func handleRobots(c echo.Context) error {
 	return c.String(http.StatusOK, "User-agent: *\nDisallow: /\n")
 }
 
-func (s *server) handleIndex(c echo.Context) error {
-	return c.Blob(http.StatusOK, "text/html; charset=utf-8", indexHTML)
+func (s *server) handleIndex() echo.HandlerFunc {
+	indexHTML := lo.Must(fs.ReadFile(s.static, "templates/index.html"))
+	return func(c echo.Context) error {
+		return c.Blob(http.StatusOK, "text/html; charset=utf-8", indexHTML)
+	}
 }
 
-func (s *server) handleReaderPage(c echo.Context) error {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid article id")
-	}
-	articles, err := getArticlesByIDs(s.db, []int64{id})
-	if err != nil {
-		return err
-	}
-	if len(articles) == 0 {
-		return echo.NewHTTPError(http.StatusNotFound, "article not found")
-	}
-	a := articles[0]
+func (s *server) handleReaderPage() echo.HandlerFunc {
+	src := lo.Must(fs.ReadFile(s.static, "templates/reader.html"))
+	tpl := lo.Must(template.New("reader").Parse(string(src)))
 
-	c.Response().Header().Set(echo.HeaderContentType, "text/html; charset=utf-8")
-	return readerTpl.Execute(c.Response(), map[string]any{
-		"Title":    a.Title,
-		"Byline":   a.Byline,
-		"SiteName": a.SiteName,
-		"URL":      a.URL,
-		"Content":  template.HTML(rewriteAssetPaths(a.ContentHTML, a.ID)),
-	})
+	return func(c echo.Context) error {
+		id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid article id")
+		}
+		articles, err := getArticlesByIDs(s.db, []int64{id})
+		if err != nil {
+			return err
+		}
+		if len(articles) == 0 {
+			return echo.NewHTTPError(http.StatusNotFound, "article not found")
+		}
+		a := articles[0]
+
+		c.Response().Header().Set(echo.HeaderContentType, "text/html; charset=utf-8")
+		return tpl.Execute(c.Response(), map[string]any{
+			"Title":    a.Title,
+			"Byline":   a.Byline,
+			"SiteName": a.SiteName,
+			"URL":      a.URL,
+			"Content":  template.HTML(rewriteAssetPaths(a.ContentHTML, a.ID)),
+		})
+	}
 }
 
 // handleArticleAsset serves a single file out of an article's bundled assets
