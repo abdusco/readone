@@ -164,7 +164,40 @@ body.index input[type=checkbox] {
   body.index { margin: 24px auto; }
   body.index h1 { flex-wrap: wrap; }
   body.index .userscript-link { margin-left: 44px; }
-  body.index .import { flex-direction: column; }
+
+  /* Collapse the table into a stack of cards: each row becomes a
+     2-column grid (checkbox | title/meta stacked) instead of forcing
+     the fixed 4-column table to squeeze into the viewport. */
+  body.index .table-wrap { border: none; background: none; overflow: visible; }
+  body.index table, body.index thead, body.index tbody, body.index tr, body.index th, body.index td {
+    display: block;
+  }
+  body.index thead tr { display: flex; align-items: center; }
+  body.index thead th { border: none; padding: 4px 4px 8px; }
+  body.index thead th:not(:first-child) { display: none; }
+
+  body.index tbody tr {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    column-gap: 10px;
+    row-gap: 2px;
+    padding: 12px;
+    margin-bottom: 8px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+  body.index tbody tr:last-child { margin-bottom: 0; }
+  body.index tbody tr td {
+    display: block;
+    border: none;
+    padding: 0;
+  }
+  body.index tbody tr td:nth-child(1) { grid-row: 1 / 4; grid-column: 1; padding-top: 2px; }
+  body.index tbody tr td:nth-child(2) { grid-column: 2; grid-row: 1; font-size: 15px; }
+  body.index tbody tr td:nth-child(3) { grid-column: 2; grid-row: 2; white-space: normal; }
+  body.index tbody tr td:nth-child(4) { grid-column: 2; grid-row: 3; }
+  body.index tbody tr td[colspan] { grid-column: 1 / -1; }
 }
 
 /* reader page */
