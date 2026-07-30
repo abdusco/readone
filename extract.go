@@ -3,16 +3,19 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	nurl "net/url"
+	"slices"
 	"strings"
 	"time"
 
 	readability "codeberg.org/readeck/go-readability/v2"
+	"github.com/samber/lo"
 	"github.com/sourcegraph/conc/pool"
 	xhtml "golang.org/x/net/html"
 )
@@ -52,14 +55,15 @@ func FetchAndExtract(ctx context.Context, rawURL string) (Article, error) {
 		SiteName:    art.SiteName(),
 		URL:         pageURL.String(),
 		ContentHTML: contentHTML,
-		Assets:      downloadImages(ctx, extractImageURLs(contentHTML)),
+		Assets:      downloadImages(ctx, extractImageURLs(contentHTML, pageURL)),
 	}, nil
 }
 
-// extractImageURLs collects the distinct absolute http(s) <img src> values in
-// contentHTML, in document order. RenderHTML already resolves relative image
-// URLs to absolute ones, so there's no base-URL handling to do here.
-func extractImageURLs(contentHTML string) []string {
+// extractImageURLs collects the distinct http(s) <img src> values in
+// contentHTML, in document order, resolving any relative src against base
+// (the page's own URL) the same way a browser would. data: URIs and
+// anything that isn't (or doesn't resolve to) an http(s) URL are skipped.
+func extractImageURLs(contentHTML string, base *nurl.URL) []string {
 	doc, err := xhtml.Parse(strings.NewReader(contentHTML))
 	if err != nil {
 		return nil
@@ -71,10 +75,15 @@ func extractImageURLs(contentHTML string) []string {
 	walk = func(n *xhtml.Node) {
 		if n.Type == xhtml.ElementNode && n.Data == "img" {
 			for _, attr := range n.Attr {
-				if attr.Key == "src" && strings.HasPrefix(attr.Val, "http") && !seen[attr.Val] {
-					seen[attr.Val] = true
-					urls = append(urls, attr.Val)
+				if attr.Key != "src" || strings.HasPrefix(attr.Val, "data:") {
+					continue
 				}
+				resolved, ok := resolveImageURL(base, attr.Val)
+				if !ok || seen[resolved] {
+					continue
+				}
+				seen[resolved] = true
+				urls = append(urls, resolved)
 			}
 		}
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
@@ -83,6 +92,28 @@ func extractImageURLs(contentHTML string) []string {
 	}
 	walk(doc)
 	return urls
+}
+
+// resolveImageURL parses ref and, if it's not already absolute, resolves it
+// against base. Reports false if ref doesn't parse, is relative with no
+// base to resolve against, or resolves to something other than http(s)
+// (e.g. javascript:, mailto:).
+func resolveImageURL(base *nurl.URL, ref string) (string, bool) {
+	u, err := nurl.Parse(ref)
+	if err != nil {
+		return "", false
+	}
+	resolved := u
+	if !u.IsAbs() {
+		if base == nil {
+			return "", false
+		}
+		resolved = base.ResolveReference(u)
+	}
+	if resolved.Scheme != "http" && resolved.Scheme != "https" {
+		return "", false
+	}
+	return resolved.String(), true
 }
 
 const (
@@ -139,6 +170,22 @@ func downloadImages(ctx context.Context, urls []string) []byte {
 		})
 	}
 	fetched := p.Wait()
+
+	fetched = lo.Without(fetched, nil)
+	// conc/pool doesn't guarantee result order matches submission order;
+	// sort by URL so the images/N.ext numbering is deterministic regardless
+	// of which fetch happens to finish first.
+	slices.SortFunc(fetched, func(a, b *fetchedImage) int {
+		return cmp.Compare(a.url, b.url)
+	})
+
+	fetched = lo.Without(fetched, nil)
+	// conc/pool doesn't guarantee result order matches submission order;
+	// sort by URL so the images/N.ext numbering is deterministic regardless
+	// of which fetch happens to finish first.
+	slices.SortFunc(fetched, func(a, b *fetchedImage) int {
+		return cmp.Compare(a.url, b.url)
+	})
 
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
