@@ -71,41 +71,43 @@
 
   // Downloads every remote <img> in contentHtml from the browser (so it goes
   // out with the same cookies/UA/referrer that already got the page itself
-  // past any bot-blocking) and packs them into a zip, rewriting each src to
-  // its path inside that zip. This makes the images available to EPUB export
-  // later even if the server can't reach the origin site directly. Images
-  // that fail to fetch are left as remote URLs, same as before this feature
-  // existed.
-  async function buildAssetsZip(contentHtml) {
+  // past any bot-blocking) and packs them into a zip, alongside a map.json
+  // recording which original URL each entry came from. The server reads that
+  // mapping to rewrite <img src> itself, so this leaves contentHtml
+  // untouched — the zip is the only thing that knows about local paths. This
+  // makes the images available to EPUB export later even if the server can't
+  // reach the origin site directly. Images that fail to fetch are simply
+  // left out of the mapping, same as before this feature existed.
+  async function buildImageAssets(contentHtml) {
     await ensureLibraries();
     const wrapper = document.createElement('div');
     wrapper.innerHTML = contentHtml;
     const zip = new unsafeWindow.JSZip();
+    const assetMap = {};
     let count = 0;
 
     for (const img of wrapper.querySelectorAll('img')) {
       const src = img.getAttribute('src');
-      if (!src || !/^https?:/i.test(src)) continue;
+      if (!src || !/^https?:/i.test(src) || assetMap[src]) continue;
       try {
         const blob = await gmFetchBlob(src);
         const ext = (blob.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg').split('+')[0];
         const name = `images/${count}.${ext}`;
         zip.file(name, blob);
-        img.setAttribute('src', name);
+        assetMap[src] = name;
         count++;
       } catch {
         // Still failed even bypassing CORS (dead link, real block, etc.) — leave the original remote src.
       }
     }
 
-    return {
-      contentHtml: wrapper.innerHTML,
-      assetsZip: count > 0 ? await zip.generateAsync({ type: 'blob' }) : null,
-    };
+    if (count === 0) return { assetsZip: null };
+    zip.file('map.json', JSON.stringify(assetMap));
+    return { assetsZip: await zip.generateAsync({ type: 'blob' }) };
   }
 
   async function saveArticle(art) {
-    const { contentHtml, assetsZip } = await buildAssetsZip(art.content || '');
+    const { assetsZip } = await buildImageAssets(art.content || '');
 
     const form = new FormData();
     form.append('metadata', JSON.stringify({
@@ -113,7 +115,7 @@
       title: art.title || '',
       byline: art.byline || '',
       siteName: art.siteName || '',
-      contentHtml,
+      contentHtml: art.content || '',
     }));
     if (assetsZip) form.append('assets', assetsZip, 'assets.zip');
 
@@ -217,6 +219,49 @@
     });
   }
 
+  // Readability's parser runs against a cloned DOM (see extract()), which
+  // clones attributes verbatim — including relative href/src/data values —
+  // not the browser-resolved absolute URL a live element's .href/.src
+  // property would give you. Left relative, those links/embeds break once
+  // the extracted content is served from ReadOne's own origin instead of
+  // the source page's. img[src] is also handled here directly (in addition
+  // to normalizeImages's more involved lazy-load/stashed-attr handling)
+  // since a plain, non-lazy <img> can reach this function without ever
+  // going through that logic — resolveUrl() is idempotent on an
+  // already-absolute URL, so re-resolving it here is harmless.
+  function resolveRelativeURLs(root) {
+    root.querySelectorAll('a[href]').forEach(a => {
+      const href = a.getAttribute('href');
+      if (href && !/^(https?:|mailto:|tel:|#|javascript:)/i.test(href)) {
+        a.setAttribute('href', resolveUrl(href));
+      }
+    });
+
+    root.querySelectorAll('object[data]').forEach(obj => {
+      const data = obj.getAttribute('data');
+      if (data && !data.startsWith('data:')) obj.setAttribute('data', resolveUrl(data));
+    });
+
+    root.querySelectorAll('img, video, audio, source').forEach(el => {
+      for (const attr of ['src', 'poster']) {
+        const val = el.getAttribute(attr);
+        if (val && !val.startsWith('data:')) el.setAttribute(attr, resolveUrl(val));
+      }
+    });
+
+    root.querySelectorAll('img[srcset], source[srcset]').forEach(el => {
+      const srcset = el.getAttribute('srcset');
+      if (!srcset) return;
+      el.setAttribute(
+        'srcset',
+        srcset.split(',').map(part => {
+          const [u, size] = part.trim().split(/\s+/);
+          return size ? `${resolveUrl(u)} ${size}` : resolveUrl(u);
+        }).join(', ')
+      );
+    });
+  }
+
   function convertBackgroundImages(root) {
     root.querySelectorAll('*').forEach(el => {
       const bg = getComputedStyle(el).backgroundImage;
@@ -297,6 +342,7 @@
     await autoScrollFullPage();
     promoteNoscriptImages(document.body);
     normalizeImages(document.body);
+    resolveRelativeURLs(document.body);
     convertBackgroundImages(document.body);
 
     const lead = findLeadImage(document.body);

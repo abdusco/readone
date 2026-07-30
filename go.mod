@@ -7,6 +7,7 @@ require (
 	github.com/bmaupin/go-epub v1.1.0
 	github.com/labstack/echo/v4 v4.15.4
 	github.com/samber/lo v1.53.0
+	github.com/sourcegraph/conc v0.3.0
 	golang.org/x/net v0.57.0
 	modernc.org/sqlite v1.55.0
 )
@@ -28,6 +29,8 @@ require (
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasttemplate v1.2.2 // indirect
 	github.com/vincent-petithory/dataurl v0.0.0-20191104211930-d1553a71de50 // indirect
+	go.uber.org/atomic v1.7.0 // indirect
+	go.uber.org/multierr v1.9.0 // indirect
 	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.40.0 // indirect

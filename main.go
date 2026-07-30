@@ -148,7 +148,7 @@ func (s *server) handleReaderPage() echo.HandlerFunc {
 			"Byline":   a.Byline,
 			"SiteName": a.SiteName,
 			"URL":      a.URL,
-			"Content":  template.HTML(rewriteAssetPaths(a.ContentHTML, a.ID)),
+			"Content":  template.HTML(rewriteAssetPaths(resolvedHTMLFor(a), a.ID)),
 		})
 	}
 }
@@ -209,7 +209,7 @@ func (s *server) handleImportURL(c echo.Context) error {
 	if err := c.Bind(&req); err != nil || req.URL == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "url is required")
 	}
-	art, err := FetchAndExtract(req.URL)
+	art, err := FetchAndExtract(c.Request().Context(), req.URL)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadGateway, fmt.Sprintf("extract failed: %v", err))
 	}

@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"html"
 	"io"
@@ -26,7 +27,7 @@ func BuildEPUB(articles []Article) (io.WriterTo, error) {
 	book := epub.NewEpub(title)
 
 	for i, a := range articles {
-		body, err := embedImages(book, a.ContentHTML, a.Assets, i)
+		body, err := embedImages(book, resolvedHTMLFor(a), a.Assets, i)
 		if err != nil {
 			return nil, fmt.Errorf("article %d (%s): %w", a.ID, a.Title, err)
 		}
@@ -145,18 +146,33 @@ func embedOneImage(book *epub.Epub, zr *zip.Reader, src string, articleIdx, imgI
 // own they're not servable, which is why images broke on the reader page
 // once asset bundling shipped.
 func rewriteAssetPaths(contentHTML string, articleID int64) string {
+	prefix := fmt.Sprintf("/articles/%d/assets/", articleID)
+	return rewriteImgSrc(contentHTML, func(src string) (string, bool) {
+		if strings.HasPrefix(src, "http") || strings.HasPrefix(src, "/") || strings.HasPrefix(src, "data:") {
+			return "", false
+		}
+		return prefix + src, true
+	})
+}
+
+// rewriteImgSrc walks contentHTML's <img> tags, replacing src with whatever
+// rewrite returns when it reports a match, and re-serializes the result.
+// contentHTML is returned unchanged if it fails to parse.
+func rewriteImgSrc(contentHTML string, rewrite func(src string) (string, bool)) string {
 	doc, err := xhtml.Parse(strings.NewReader(contentHTML))
 	if err != nil {
 		return contentHTML
 	}
 
-	prefix := fmt.Sprintf("/articles/%d/assets/", articleID)
 	var walk func(*xhtml.Node)
 	walk = func(n *xhtml.Node) {
 		if n.Type == xhtml.ElementNode && n.Data == "img" {
 			for i, attr := range n.Attr {
-				if attr.Key == "src" && !strings.HasPrefix(attr.Val, "http") && !strings.HasPrefix(attr.Val, "/") && !strings.HasPrefix(attr.Val, "data:") {
-					n.Attr[i].Val = prefix + attr.Val
+				if attr.Key != "src" {
+					continue
+				}
+				if newSrc, ok := rewrite(attr.Val); ok {
+					n.Attr[i].Val = newSrc
 				}
 			}
 		}
@@ -177,6 +193,45 @@ func rewriteAssetPaths(contentHTML string, articleID int64) string {
 		}
 	}
 	return buf.String()
+}
+
+// readAssetMap reads the optional map.json entry an assets zip may contain,
+// mapping each original absolute image URL to its path inside the zip (e.g.
+// "images/0.jpg"). Returns nil if the entry is missing or invalid — that
+// just means there's nothing to rewrite (covers zips built before this
+// mapping existed, and articles with no downloaded images at all).
+func readAssetMap(zr *zip.Reader) map[string]string {
+	data, ok := readZipEntry(zr, "map.json")
+	if !ok {
+		return nil
+	}
+	var m map[string]string
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil
+	}
+	return m
+}
+
+// resolvedHTMLFor returns a.ContentHTML with any <img src> that the assets
+// zip's map.json knows about rewritten to its zip-relative path, so the
+// existing rewriteAssetPaths (reader page) / embedImages (EPUB) logic can
+// pick it up exactly as if the userscript had baked the path in itself.
+func resolvedHTMLFor(a Article) string {
+	if len(a.Assets) == 0 {
+		return a.ContentHTML
+	}
+	zr, err := zip.NewReader(bytes.NewReader(a.Assets), int64(len(a.Assets)))
+	if err != nil {
+		return a.ContentHTML
+	}
+	assetMap := readAssetMap(zr)
+	if len(assetMap) == 0 {
+		return a.ContentHTML
+	}
+	return rewriteImgSrc(a.ContentHTML, func(src string) (string, bool) {
+		p, ok := assetMap[src]
+		return p, ok
+	})
 }
 
 func readZipEntry(zr *zip.Reader, name string) ([]byte, bool) {
