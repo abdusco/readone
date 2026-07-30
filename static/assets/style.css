@@ -124,34 +124,56 @@ body.index button[type=submit] {
 }
 body.index button[type=submit]:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
 
-body.index .table-wrap {
-  overflow-x: auto;
+body.index .select-all {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+body.index .cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+body.index .cards .empty {
+  padding: 16px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
-body.index table { width: 100%; border-collapse: collapse; }
-body.index th {
-  text-align: left;
-  padding: 10px 12px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-muted);
-  border-bottom: 1px solid var(--border);
-}
-body.index td {
-  text-align: left;
-  padding: 10px 12px;
-  font-size: 14px;
-  vertical-align: top;
-  border-bottom: 1px solid var(--border);
-}
-body.index tbody tr:last-child td { border-bottom: none; }
-body.index tbody tr:hover { background: var(--bg); }
 
-body.index td.meta { color: var(--text-muted); font-size: 13px; white-space: nowrap; }
-body.index td a { color: var(--accent); font-weight: 500; text-decoration: none; }
-body.index td a:hover { text-decoration: underline; }
+body.index .card {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+body.index .card:hover { border-color: var(--accent); }
+body.index .card.selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+
+body.index .card input[type=checkbox] { margin-top: 3px; }
+
+body.index .card-body a {
+  display: inline-block;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text);
+  text-decoration: none;
+  margin-bottom: 4px;
+}
+body.index .card-body a:hover { color: var(--accent); text-decoration: underline; }
+
+body.index .card .meta { color: var(--text-muted); font-size: 13px; }
 
 body.index input[type=checkbox] {
   width: 16px;
@@ -164,40 +186,6 @@ body.index input[type=checkbox] {
   body.index { margin: 24px auto; }
   body.index h1 { flex-wrap: wrap; }
   body.index .userscript-link { margin-left: 44px; }
-
-  /* Collapse the table into a stack of cards: each row becomes a
-     2-column grid (checkbox | title/meta stacked) instead of forcing
-     the fixed 4-column table to squeeze into the viewport. */
-  body.index .table-wrap { border: none; background: none; overflow: visible; }
-  body.index table, body.index thead, body.index tbody, body.index tr, body.index th, body.index td {
-    display: block;
-  }
-  body.index thead tr { display: flex; align-items: center; }
-  body.index thead th { border: none; padding: 4px 4px 8px; }
-  body.index thead th:not(:first-child) { display: none; }
-
-  body.index tbody tr {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    column-gap: 10px;
-    row-gap: 2px;
-    padding: 12px;
-    margin-bottom: 8px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-  }
-  body.index tbody tr:last-child { margin-bottom: 0; }
-  body.index tbody tr td {
-    display: block;
-    border: none;
-    padding: 0;
-  }
-  body.index tbody tr td:nth-child(1) { grid-row: 1 / 4; grid-column: 1; padding-top: 2px; }
-  body.index tbody tr td:nth-child(2) { grid-column: 2; grid-row: 1; font-size: 15px; }
-  body.index tbody tr td:nth-child(3) { grid-column: 2; grid-row: 2; white-space: normal; }
-  body.index tbody tr td:nth-child(4) { grid-column: 2; grid-row: 3; }
-  body.index tbody tr td[colspan] { grid-column: 1 / -1; }
 }
 
 /* reader page */

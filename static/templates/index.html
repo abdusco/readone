@@ -21,6 +21,10 @@
   <div class="error" x-show="error" x-text="error"></div>
 
   <div class="actions">
+    <label class="select-all">
+      <input type="checkbox" x-bind:checked="articles.length > 0 && selected.length === articles.length" x-on:click="selectAll($event.target.checked)">
+      Select all
+    </label>
     <button x-on:click="downloadEpub()" x-bind:disabled="selected.length === 0 || exporting">
       <span x-show="!exporting">⬇ Download selected as EPUB (<span x-text="selected.length"></span>)</span>
       <span x-show="exporting">Building EPUB…</span>
@@ -32,30 +36,20 @@
     </button>
   </div>
 
-  <div class="table-wrap">
-  <table>
-    <thead>
-      <tr>
-        <th><input type="checkbox" x-on:click="selectAll($event.target.checked)"></th>
-        <th>Title</th>
-        <th>Source</th>
-        <th>Saved</th>
-      </tr>
-    </thead>
-    <tbody>
-      <template x-if="articles.length === 0">
-        <tr><td colspan="4" class="meta">No articles saved yet.</td></tr>
-      </template>
-      <template x-for="a in articles" x-bind:key="a.id">
-        <tr>
-          <td><input type="checkbox" x-bind:value="a.id" x-model="selected"></td>
-          <td><a x-bind:href="`/articles/${a.id}`" x-text="a.title"></a></td>
-          <td class="meta" x-text="[a.siteName, a.byline].filter(Boolean).join(' · ')"></td>
-          <td class="meta" x-text="new Date(a.createdAt).toLocaleString()"></td>
-        </tr>
-      </template>
-    </tbody>
-  </table>
+  <div class="cards">
+    <template x-if="articles.length === 0">
+      <div class="empty meta">No articles saved yet.</div>
+    </template>
+    <template x-for="a in articles" x-bind:key="a.id">
+      <label class="card" x-bind:class="selected.includes(String(a.id)) && 'selected'">
+        <input type="checkbox" x-bind:value="a.id" x-model="selected">
+        <div class="card-body">
+          <a x-bind:href="`/articles/${a.id}`" x-text="a.title"></a>
+          <div class="meta" x-text="[a.siteName, a.byline].filter(Boolean).join(' · ')"></div>
+          <div class="meta" x-text="new Date(a.createdAt).toLocaleString()"></div>
+        </div>
+      </label>
+    </template>
   </div>
 
   <script>
