@@ -1,11 +1,10 @@
 // ==UserScript==
 // @name         Readability by readone
 // @namespace    readable-extractor
-// @version      2.2
-// @description  Simplify page with Readability.js, download as Markdown
+// @version      2.3
+// @description  Simplify page with Readability.js, save to ReadOne
 // @match        *://*/*
 // @noframes
-// @grant        GM_setClipboard
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -22,10 +21,10 @@
   const SAVE_URL = "__SAVE_URL__";
   const saveConfigured = SAVE_URL && SAVE_URL !== '__SAVE_URL__';
 
-  // Readability/Turndown/JSZip used to be @require'd, which makes Tampermonkey
-  // execute all three on every single page load matching @match *://*/*, even
-  // pages the Reader button is never clicked on. Load them on demand instead,
-  // the first time the button is used, and cache the loading promise so a
+  // Readability/JSZip used to be @require'd, which makes Tampermonkey execute
+  // both on every single page load matching @match *://*/*, even pages the
+  // Reader button is never clicked on. Load them on demand instead, the
+  // first time the button is used, and cache the loading promise so a
   // second click doesn't reload them.
   let librariesPromise = null;
   function loadScript(url) {
@@ -41,7 +40,6 @@
     if (!librariesPromise) {
       librariesPromise = Promise.all([
         loadScript('https://unpkg.com/@mozilla/readability@0.5.0/Readability.js'),
-        loadScript('https://unpkg.com/turndown@7.1.2/dist/turndown.js'),
         loadScript('https://unpkg.com/jszip@3.10.1/dist/jszip.min.js'),
       ]);
     }
@@ -460,14 +458,6 @@
     return ensureLeadImage(art, lead);
   }
 
-  function slugify(s) {
-    return (s || 'article')
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 80);
-  }
-
   // archive.ph/.is/.today (and its mirror domains) embed the original URL
   // directly in their own URL, right after a timestamp/"newest"/"o/<code>"
   // path segment — pull that out so the markdown links to the real article
@@ -479,89 +469,120 @@
     return m ? m[1] : null;
   }
 
-  function toMarkdown(art) {
-    const td = new unsafeWindow.TurndownService({
-      headingStyle: 'atx',
-      codeBlockStyle: 'fenced',
-      bulletListMarker: '-',
-    });
-    const body = td.turndown(art.content);
-    const meta = [
-      `# ${art.title || 'Untitled'}`,
-      '',
-      art.byline ? `*${art.byline}*` : null,
-      art.siteName ? `Source: ${art.siteName}` : null,
-      `URL: ${extractArchivedUrl() || location.href}`,
-      '',
-      '---',
-      '',
-    ].filter(Boolean).join('\n');
-    return meta + '\n' + body;
-  }
-
-  function download(filename, text) {
-    const blob = new Blob([text], { type: 'text/markdown;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
+  // Mirrors static/assets/style.css's body.reader look (same variable names
+  // and values), scoped under #re-overlay since this renders inside
+  // arbitrary third-party pages that can't be trusted to leave :root alone.
   function renderReaderView(art) {
     const overlay = document.createElement('div');
     overlay.id = 're-overlay';
     overlay.innerHTML = `
       <style>
         #re-overlay {
-          position: fixed; inset: 0; background: #fff; color: #1a1a1a;
-          z-index: 2147483647; overflow-y: auto; font-family: Georgia, serif;
+          --bg: #f6f7f9; --surface: #ffffff; --border: #dde1e6; --text: #111827;
+          --text-muted: #4b5563; --accent: #4f46e5; --shadow: 0 1px 2px rgba(16, 24, 40, .06);
+          --radius: 10px;
+          position: fixed; inset: 0; z-index: 2147483647; overflow-y: auto;
+          background: var(--bg); color: var(--text);
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+          line-height: 1.5; -webkit-font-smoothing: antialiased;
+        }
+        @media (prefers-color-scheme: dark) {
+          #re-overlay {
+            --bg: #101215; --surface: #191c22; --border: #2e323b; --text: #e5e7eb;
+            --text-muted: #9aa1ad; --accent: #818cf8; --shadow: 0 1px 2px rgba(0, 0, 0, .3);
+          }
         }
         #re-toolbar {
-          position: sticky; top: 0; background: #f5f5f5; border-bottom: 1px solid #ddd;
+          position: sticky; top: 0; background: var(--surface); border-bottom: 1px solid var(--border);
           padding: 10px 20px; display: flex; gap: 10px; align-items: center; z-index: 2;
-          font-family: -apple-system, sans-serif;
         }
         #re-toolbar button {
-          padding: 6px 14px; border: 1px solid #ccc; background: #fff; border-radius: 4px;
-          cursor: pointer; font-size: 13px;
+          display: inline-flex; align-items: center; gap: 6px;
+          padding: 8px 14px; border: 1px solid var(--border); background: var(--surface);
+          border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; color: var(--text);
         }
-        #re-toolbar button:hover { background: #eee; }
-        #re-content {
-          max-width: 700px; margin: 30px auto 80px; padding: 0 20px; line-height: 1.6; font-size: 18px;
+        #re-toolbar button:hover:not(:disabled) { border-color: var(--accent); }
+        #re-toolbar button:disabled { opacity: .5; cursor: not-allowed; }
+        #re-toolbar .re-spacer { flex: 1; }
+        #re-page { max-width: 700px; margin: 0 auto; padding: 30px 20px 80px; }
+        #re-page h1 {
+          font-family: Georgia, serif; font-size: 32px; line-height: 1.1;
+          margin: 0 0 4px; letter-spacing: -.01em;
         }
-        #re-content img { max-width: 100%; height: auto; display: block; margin: 12px 0; }
-        #re-content h1 { font-size: 32px; margin-bottom: 4px; }
-        #re-meta { color: #666; font-size: 14px; margin-bottom: 20px; font-family: sans-serif; }
-        #re-content pre { background: #f5f5f5; padding: 12px; overflow-x: auto; }
+        #re-meta { color: var(--text-muted); font-size: 14px; margin-bottom: 24px; }
+        #re-body { font-family: Georgia, serif; font-size: 18px; line-height: 1.6; }
+        #re-body img { max-width: 100%; height: auto; display: block; margin: 12px 0; border-radius: 6px; }
+        #re-body pre {
+          background: var(--surface); border: 1px solid var(--border);
+          border-radius: 8px; padding: 12px; overflow-x: auto;
+        }
+        #re-overlay.font-sans #re-page h1, #re-overlay.font-sans #re-body {
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+        #re-overlay.size-s #re-body { font-size: 15px; }
+        #re-overlay.size-l #re-body { font-size: 21px; }
+        #re-overlay.width-wide #re-page { max-width: 900px; }
+
+        #re-settings { position: relative; }
+        #re-settings-toggle { width: 36px; height: 36px; padding: 0; justify-content: center; font-size: 15px; font-weight: 600; }
+        #re-settings-panel {
+          position: absolute; top: 44px; right: 0; width: 220px;
+          background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+          box-shadow: var(--shadow); padding: 12px; z-index: 3;
+        }
+        #re-settings-panel[hidden] { display: none; }
+        #re-settings .settings-group + .settings-group { margin-top: 10px; }
+        #re-settings .settings-label { display: block; font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; }
+        #re-settings .segmented { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+        #re-settings .segmented button { flex: 1; border: none; border-radius: 0; padding: 6px 8px; font-size: 13px; justify-content: center; }
+        #re-settings .segmented button + button { border-left: 1px solid var(--border); }
+        #re-settings .segmented button.active { background: var(--accent); color: #fff; }
+        #re-settings .segmented button:hover:not(.active) { background: var(--bg); border-color: var(--border); }
+        @media (prefers-color-scheme: dark) {
+          #re-settings .segmented button.active { color: #101215; }
+        }
       </style>
       <div id="re-toolbar">
         <button id="re-close">✕ Close</button>
-        <button id="re-dl-md">⬇ Download .md</button>
-        <button id="re-copy-md">📋 Copy Markdown</button>
+        <div class="re-spacer"></div>
+        <div id="re-settings">
+          <button id="re-settings-toggle" aria-haspopup="true" aria-expanded="false">Aa</button>
+          <div id="re-settings-panel" hidden>
+            <div class="settings-group">
+              <span class="settings-label">Font</span>
+              <div class="segmented" data-setting="font">
+                <button type="button" data-value="serif">Serif</button>
+                <button type="button" data-value="sans">Sans</button>
+              </div>
+            </div>
+            <div class="settings-group">
+              <span class="settings-label">Size</span>
+              <div class="segmented" data-setting="size">
+                <button type="button" data-value="s">S</button>
+                <button type="button" data-value="m">M</button>
+                <button type="button" data-value="l">L</button>
+              </div>
+            </div>
+            <div class="settings-group">
+              <span class="settings-label">Width</span>
+              <div class="segmented" data-setting="width">
+                <button type="button" data-value="narrow">Narrow</button>
+                <button type="button" data-value="wide">Wide</button>
+              </div>
+            </div>
+          </div>
+        </div>
         ${saveConfigured ? '<button id="re-save">💾 Save</button>' : ''}
       </div>
-      <div id="re-content">
+      <div id="re-page">
         <h1>${art.title || ''}</h1>
         <div id="re-meta">${[art.byline, art.siteName].filter(Boolean).join(' · ')}</div>
-        ${art.content}
+        <div id="re-body">${art.content}</div>
       </div>
     `;
     document.body.appendChild(overlay);
 
     overlay.querySelector('#re-close').onclick = () => overlay.remove();
-    overlay.querySelector('#re-dl-md').onclick = () => {
-      download(`${slugify(art.title)}.md`, toMarkdown(art));
-    };
-    overlay.querySelector('#re-copy-md').onclick = () => {
-      const md = toMarkdown(art);
-      if (typeof GM_setClipboard === 'function') {
-        GM_setClipboard(md, 'text');
-      } else {
-        navigator.clipboard.writeText(md);
-      }
-    };
     if (saveConfigured) {
       const saveBtn = overlay.querySelector('#re-save');
       saveBtn.onclick = async () => {
@@ -578,6 +599,61 @@
         }
       };
     }
+
+    wireReaderSettings(overlay);
+  }
+
+  // Font/size/width, same three knobs as static/templates/reader.html, kept
+  // in GM storage (not localStorage) so the preference is one global value
+  // instead of being siloed per-origin the reader button happens to run on.
+  const READER_SETTINGS_KEY = 're-reader-settings';
+  const READER_SETTINGS_DEFAULTS = { font: 'serif', size: 'm', width: 'narrow' };
+
+  function wireReaderSettings(overlay) {
+    const settings = Object.assign(
+      {},
+      READER_SETTINGS_DEFAULTS,
+      typeof GM_getValue === 'function' ? GM_getValue(READER_SETTINGS_KEY, {}) : {}
+    );
+
+    function apply() {
+      overlay.classList.toggle('font-sans', settings.font === 'sans');
+      overlay.classList.toggle('size-s', settings.size === 's');
+      overlay.classList.toggle('size-l', settings.size === 'l');
+      overlay.classList.toggle('width-wide', settings.width === 'wide');
+      overlay.querySelectorAll('.segmented').forEach(group => {
+        const key = group.dataset.setting;
+        group.querySelectorAll('button').forEach(btn => {
+          btn.classList.toggle('active', btn.dataset.value === settings[key]);
+        });
+      });
+    }
+
+    overlay.querySelectorAll('.segmented button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const key = btn.closest('.segmented').dataset.setting;
+        settings[key] = btn.dataset.value;
+        if (typeof GM_setValue === 'function') GM_setValue(READER_SETTINGS_KEY, settings);
+        apply();
+      });
+    });
+
+    const toggle = overlay.querySelector('#re-settings-toggle');
+    const panel = overlay.querySelector('#re-settings-panel');
+    toggle.addEventListener('click', e => {
+      e.stopPropagation();
+      const open = panel.hasAttribute('hidden');
+      if (open) panel.removeAttribute('hidden'); else panel.setAttribute('hidden', '');
+      toggle.setAttribute('aria-expanded', String(open));
+    });
+    overlay.addEventListener('click', e => {
+      if (!panel.hasAttribute('hidden') && !panel.contains(e.target) && e.target !== toggle) {
+        panel.setAttribute('hidden', '');
+        toggle.setAttribute('aria-expanded', 'false');
+      }
+    });
+
+    apply();
   }
 
   const TRIGGER_WIDTH = 40;
