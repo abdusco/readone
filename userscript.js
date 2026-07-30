@@ -345,17 +345,26 @@
   // thumbnail (scr.png), not the original article's image.
   function findLeadImage(root) {
     const scope = root.querySelector('article') || root;
+    // Specific "this really is the lead image" signals first — the class/id
+    // can land on the <img> itself (e.g. <img class="article-featured-image">)
+    // or on a wrapper around it, so both forms are matched. 'header img' is
+    // deliberately last and resort: a <header> just as often holds a small
+    // byline avatar, which would otherwise get picked over the real photo.
     const selectors = [
+      'img[id*="lead-image" i]', '[id*="lead-image" i] img',
+      'img[class*="lead-image" i]', '[class*="lead-image" i] img',
+      'img[class*="hero-image" i]', '[class*="hero-image" i] img',
+      'img[class*="featured-image" i]', '[class*="featured-image" i] img',
       'header img',
-      '[id*="lead-image" i] img',
-      '[class*="lead-image" i] img',
-      '[class*="hero-image" i] img',
-      '[class*="featured-image" i] img',
     ];
     for (const sel of selectors) {
       const img = scope.querySelector(sel);
       const src = img && img.getAttribute('src');
-      if (src && !src.startsWith('data:')) return { src: resolveUrl(src), alt: img.getAttribute('alt') || '' };
+      if (!src || src.startsWith('data:')) continue;
+      const w = img.naturalWidth || parseInt(img.getAttribute('width'), 10) || 0;
+      const h = img.naturalHeight || parseInt(img.getAttribute('height'), 10) || 0;
+      if ((w && w < 120) || (h && h < 120)) continue;
+      return { src: resolveUrl(src), alt: img.getAttribute('alt') || '' };
     }
     // Fallback: the hero image is almost always the first substantial <img>
     // before the body text, even when it isn't in a semantically-named
