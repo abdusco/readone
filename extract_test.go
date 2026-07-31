@@ -28,13 +28,13 @@ func TestDownloadImages(t *testing.T) {
 		// value serves a 404 instead, so a case can exercise "image URL is
 		// dead" without a separate field.
 		contents map[string][]byte
-		assert   func(t *testing.T, actual []byte)
+		assert   func(t *testing.T, actual Assets)
 	}{
 		{
 			name:     "no urls",
 			contents: map[string][]byte{},
-			assert: func(t *testing.T, actual []byte) {
-				assert.Nil(t, actual)
+			assert: func(t *testing.T, actual Assets) {
+				assert.True(t, actual.Empty())
 			},
 		},
 		{
@@ -46,11 +46,10 @@ func TestDownloadImages(t *testing.T) {
 				"/empty.jpg":   {},
 				"/fake.png":    []byte("<html>not an image</html>"),
 			},
-			assert: func(t *testing.T, actual []byte) {
-				zr := requireZip(t, actual)
-				assetMap := readAssetMap(zr)
+			assert: func(t *testing.T, actual Assets) {
+				assetMap := actual.AssetMap()
 				require.Len(t, assetMap, 2)
-				assertZipContains(t, zr, map[string][]byte{
+				assertZipContains(t, actual, map[string][]byte{
 					"images/0.png": pngMagic,
 					"images/1.jpg": jpegMagic,
 				})
@@ -84,23 +83,13 @@ func TestDownloadImages(t *testing.T) {
 	}
 }
 
-// requireZip parses actual as a zip, failing the test immediately if it
-// isn't one.
-func requireZip(t *testing.T, actual []byte) *zip.Reader {
-	t.Helper()
-	require.NotNil(t, actual)
-	zr, err := zip.NewReader(bytes.NewReader(actual), int64(len(actual)))
-	require.NoError(t, err)
-	return zr
-}
-
 // assertZipContains asserts that for every zipPath -> content pair in want,
-// zr has an entry at zipPath whose bytes equal content.
-func assertZipContains(t *testing.T, zr *zip.Reader, want map[string][]byte) {
+// assets has an entry at zipPath whose bytes equal content.
+func assertZipContains(t *testing.T, assets Assets, want map[string][]byte) {
 	t.Helper()
 	for path, wantData := range want {
-		data, ok := readZipEntry(zr, path)
-		if !assert.True(t, ok, "zip missing entry %q", path) {
+		data, err := assets.Entry(path)
+		if !assert.NoError(t, err, "zip missing entry %q", path) {
 			continue
 		}
 		assert.Equal(t, wantData, data, "zip entry %q", path)
@@ -253,7 +242,7 @@ func TestStripEmptyLists(t *testing.T) {
 	}
 }
 
-func TestReadAssetMap(t *testing.T) {
+func TestAssetMap(t *testing.T) {
 	tests := []struct {
 		name    string
 		entries map[string][]byte // zip entries to write; "map.json" is written verbatim if present
@@ -288,10 +277,10 @@ func TestReadAssetMap(t *testing.T) {
 			}
 			require.NoError(t, zw.Close())
 
-			zr, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+			assets, err := NewAssets(buf.Bytes())
 			require.NoError(t, err)
 
-			assert.Equal(t, tt.want, readAssetMap(zr))
+			assert.Equal(t, tt.want, assets.AssetMap())
 		})
 	}
 }

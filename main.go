@@ -1,8 +1,6 @@
 package main
 
 import (
-	"archive/zip"
-	"bytes"
 	"context"
 	"embed"
 	"encoding/json"
@@ -65,8 +63,8 @@ func main() {
 
 	s := &server{repo: repo, static: content}
 
-	e.GET("/", s.handleIndex())
-	e.GET("/articles/:id", s.handleReaderPage())
+	e.GET("/", s.handleIndex)
+	e.GET("/articles/:id", s.handleReaderPage)
 	e.GET("/articles/:id/assets/*", s.handleArticleAsset)
 	e.POST("/articles/epub", s.handleEPUB)
 	e.GET("/readone.user.js", serveUserscript)
@@ -117,44 +115,40 @@ func handleRobots(c echo.Context) error {
 	return c.String(http.StatusOK, "User-agent: *\nDisallow: /\n")
 }
 
-func (s *server) handleIndex() echo.HandlerFunc {
+func (s *server) handleIndex(c echo.Context) error {
 	indexHTML := lo.Must(fs.ReadFile(s.static, "templates/index.html"))
-	return func(c echo.Context) error {
-		return c.Blob(http.StatusOK, "text/html; charset=utf-8", indexHTML)
-	}
+	return c.Blob(http.StatusOK, "text/html; charset=utf-8", indexHTML)
 }
 
-func (s *server) handleReaderPage() echo.HandlerFunc {
+func (s *server) handleReaderPage(c echo.Context) error {
 	src := lo.Must(fs.ReadFile(s.static, "templates/reader.html"))
 	tpl := lo.Must(template.New("reader").Parse(string(src)))
 
-	return func(c echo.Context) error {
-		id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-		if err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid article id")
-		}
-		articles, err := s.repo.GetArticlesByIDs([]int64{id})
-		if err != nil {
-			return err
-		}
-		if len(articles) == 0 {
-			return echo.NewHTTPError(http.StatusNotFound, "article not found")
-		}
-		a := articles[0]
-
-		c.Response().Header().Set(echo.HeaderContentType, "text/html; charset=utf-8")
-		return tpl.Execute(c.Response(), map[string]any{
-			"Title":    a.Title,
-			"Byline":   a.Byline,
-			"SiteName": a.SiteName,
-			"URL":      a.URL,
-			"Content": template.HTML(transformHTMLString(a.ContentHTML,
-				resolveAssetPathsTransform(a),
-				stripEmptyListsTransform,
-				rewriteAssetPathsTransform(a.ID),
-			)),
-		})
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid article id")
 	}
+	articles, err := s.repo.GetArticlesByIDs([]int64{id})
+	if err != nil {
+		return err
+	}
+	if len(articles) == 0 {
+		return echo.NewHTTPError(http.StatusNotFound, "article not found")
+	}
+	a := articles[0]
+
+	c.Response().Header().Set(echo.HeaderContentType, "text/html; charset=utf-8")
+	return tpl.Execute(c.Response(), map[string]any{
+		"Title":    a.Title,
+		"Byline":   a.Byline,
+		"SiteName": a.SiteName,
+		"URL":      a.URL,
+		"Content": template.HTML(transformHTMLString(a.ContentHTML,
+			resolveAssetPathsTransform(a),
+			stripEmptyListsTransform,
+			rewriteAssetPathsTransform(a.ID),
+		)),
+	})
 }
 
 // handleArticleAsset serves a single file out of an article's bundled assets
@@ -170,16 +164,12 @@ func (s *server) handleArticleAsset(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if len(articles) == 0 || len(articles[0].Assets) == 0 {
+	if len(articles) == 0 || articles[0].Assets.Empty() {
 		return echo.NewHTTPError(http.StatusNotFound, "asset not found")
 	}
 
-	zr, err := zip.NewReader(bytes.NewReader(articles[0].Assets), int64(len(articles[0].Assets)))
+	data, err := articles[0].Assets.Entry(name)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "corrupt assets archive")
-	}
-	data, ok := readZipEntry(zr, name)
-	if !ok {
 		return echo.NewHTTPError(http.StatusNotFound, "asset not found")
 	}
 	return c.Blob(http.StatusOK, http.DetectContentType(data), data)
@@ -246,17 +236,18 @@ func (s *server) handleAPIImport(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "url and contentHtml are required")
 	}
 
-	var assets []byte
+	var assets Assets
 	if fh, err := c.FormFile("assets"); err == nil {
 		f, err := fh.Open()
 		if err != nil {
 			return err
 		}
 		defer f.Close()
-		if assets, err = io.ReadAll(f); err != nil {
+		data, err := io.ReadAll(f)
+		if err != nil {
 			return err
 		}
-		if _, err := zip.NewReader(bytes.NewReader(assets), int64(len(assets))); err != nil {
+		if assets, err = NewAssets(data); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "assets is not a valid zip archive")
 		}
 	}

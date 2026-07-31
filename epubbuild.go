@@ -1,10 +1,8 @@
 package main
 
 import (
-	"archive/zip"
 	"bytes"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"html"
 	"io"
@@ -30,7 +28,7 @@ func BuildEPUB(articles []Article) (io.WriterTo, error) {
 		body := transformHTMLString(a.ContentHTML,
 			resolveAssetPathsTransform(a),
 			stripEmptyListsTransform,
-			embedImagesTransform(book, assetsZipReader(a.Assets), i),
+			embedImagesTransform(book, a.Assets, i),
 		)
 
 		header := fmt.Sprintf(`<p><em>%s</em></p><p><a href="%s">%s</a></p>`,
@@ -121,29 +119,17 @@ func walkImgSrc(doc *xhtml.Node, rewrite func(src string) (string, bool)) {
 	walk(doc)
 }
 
-// assetsZipReader opens assetsZip, returning nil if it's empty or invalid.
-func assetsZipReader(assetsZip []byte) *zip.Reader {
-	if len(assetsZip) == 0 {
-		return nil
-	}
-	zr, err := zip.NewReader(bytes.NewReader(assetsZip), int64(len(assetsZip)))
-	if err != nil {
-		return nil
-	}
-	return zr
-}
-
 // embedImagesTransform embeds every <img> into the EPUB, rewriting its src to
 // the internal path go-epub returns. Images the userscript already bundled
 // into assets (referenced by relative path, e.g. "images/0.jpg") are read
 // straight from the zip; anything else falls back to fetching the remote URL
 // directly, which is the only option for articles imported by URL (no
 // browser involved).
-func embedImagesTransform(book *epub.Epub, zr *zip.Reader, articleIdx int) func(*xhtml.Node) {
+func embedImagesTransform(book *epub.Epub, assets Assets, articleIdx int) func(*xhtml.Node) {
 	imgIdx := 0
 	return func(doc *xhtml.Node) {
 		walkImgSrc(doc, func(src string) (string, bool) {
-			internalPath, ok := embedOneImage(book, zr, src, articleIdx, imgIdx)
+			internalPath, ok := embedOneImage(book, assets, src, articleIdx, imgIdx)
 			if !ok {
 				return "", false
 			}
@@ -156,10 +142,10 @@ func embedImagesTransform(book *epub.Epub, zr *zip.Reader, articleIdx int) func(
 // embedOneImage embeds a single image, preferring the bundled zip asset (if
 // any) over a live fetch of a remote URL. Failures are non-fatal: the caller
 // leaves the original src in place rather than aborting the whole export.
-func embedOneImage(book *epub.Epub, zr *zip.Reader, src string, articleIdx, imgIdx int) (string, bool) {
-	if zr != nil && !strings.HasPrefix(src, "http") {
-		data, ok := readZipEntry(zr, src)
-		if !ok {
+func embedOneImage(book *epub.Epub, assets Assets, src string, articleIdx, imgIdx int) (string, bool) {
+	if !assets.Empty() && !strings.HasPrefix(src, "http") {
+		data, err := assets.Entry(src)
+		if err != nil {
 			return "", false
 		}
 		mime := http.DetectContentType(data)
@@ -201,37 +187,13 @@ func rewriteAssetPathsTransform(articleID int64) func(*xhtml.Node) {
 	}
 }
 
-// readAssetMap reads the optional map.json entry an assets zip may contain,
-// mapping each original absolute image URL to its path inside the zip (e.g.
-// "images/0.jpg"). Returns nil if the entry is missing or invalid — that
-// just means there's nothing to rewrite (covers zips built before this
-// mapping existed, and articles with no downloaded images at all).
-func readAssetMap(zr *zip.Reader) map[string]string {
-	data, ok := readZipEntry(zr, "map.json")
-	if !ok {
-		return nil
-	}
-	var m map[string]string
-	if err := json.Unmarshal(data, &m); err != nil {
-		return nil
-	}
-	return m
-}
-
 // resolveAssetPathsTransform rewrites any <img src> that a.Assets' map.json
 // knows about to its zip-relative path, so rewriteAssetPathsTransform
 // (reader page) / embedImagesTransform (EPUB) can pick it up exactly as if
 // the userscript had baked the path in itself.
 func resolveAssetPathsTransform(a Article) func(*xhtml.Node) {
 	return func(doc *xhtml.Node) {
-		if len(a.Assets) == 0 {
-			return
-		}
-		zr := assetsZipReader(a.Assets)
-		if zr == nil {
-			return
-		}
-		assetMap := readAssetMap(zr)
+		assetMap := a.Assets.AssetMap()
 		if len(assetMap) == 0 {
 			return
 		}
@@ -240,26 +202,6 @@ func resolveAssetPathsTransform(a Article) func(*xhtml.Node) {
 			return p, ok
 		})
 	}
-}
-
-func readZipEntry(zr *zip.Reader, name string) ([]byte, bool) {
-	name = strings.TrimPrefix(name, "./")
-	for _, f := range zr.File {
-		if f.Name != name {
-			continue
-		}
-		rc, err := f.Open()
-		if err != nil {
-			return nil, false
-		}
-		defer rc.Close()
-		data, err := io.ReadAll(rc)
-		if err != nil {
-			return nil, false
-		}
-		return data, true
-	}
-	return nil, false
 }
 
 func extForMime(mime string) string {

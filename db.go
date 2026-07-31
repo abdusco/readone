@@ -1,8 +1,13 @@
 package main
 
 import (
+	"archive/zip"
+	"bytes"
 	"database/sql"
+	"database/sql/driver"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,13 +23,99 @@ type Article struct {
 	SiteName    string    `json:"siteName"`
 	URL         string    `json:"url"`
 	ContentHTML string    `json:"contentHtml"`
-	// Assets is an optional zip archive (built client-side by the userscript)
-	// containing the article's images, referenced from ContentHTML by
-	// relative path (e.g. "images/0.jpg") instead of remote URL. This lets
-	// EPUB export embed images without depending on the origin site's
-	// server being reachable/unblocked at export time.
-	Assets    []byte    `json:"-"`
-	CreatedAt time.Time `json:"createdAt"`
+	Assets      Assets    `json:"-"`
+	CreatedAt   time.Time `json:"createdAt"`
+}
+
+// Assets is an optional zip archive (built client-side by the userscript, or
+// server-side by downloadImages) containing an article's images, referenced
+// from ContentHTML by relative path (e.g. "images/0.jpg") instead of remote
+// URL. This lets EPUB export and the reader page render images without
+// depending on the origin site's server being reachable later.
+type Assets struct {
+	data []byte
+	zr   *zip.Reader // nil iff data is empty; parsed once at construction
+}
+
+// NewAssets wraps data as a zip archive of assets, parsing it immediately so
+// corruption is caught at construction time rather than resurfacing later
+// when something tries to read an entry out of it. Empty/nil data is valid —
+// it just means "no assets".
+func NewAssets(data []byte) (Assets, error) {
+	if len(data) == 0 {
+		return Assets{}, nil
+	}
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return Assets{}, fmt.Errorf("invalid assets zip: %w", err)
+	}
+	return Assets{data: data, zr: zr}, nil
+}
+
+// Empty reports whether there are no assets at all.
+func (a Assets) Empty() bool { return len(a.data) == 0 }
+
+// Entry extracts a single file from the assets zip by path (e.g. "images/0.jpg").
+func (a Assets) Entry(path string) ([]byte, error) {
+	if a.zr == nil {
+		return nil, fmt.Errorf("asset %q not found", path)
+	}
+	path = strings.TrimPrefix(path, "./")
+	for _, f := range a.zr.File {
+		if f.Name != path {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return nil, err
+		}
+		defer rc.Close()
+		return io.ReadAll(rc)
+	}
+	return nil, fmt.Errorf("asset %q not found", path)
+}
+
+// AssetMap reads the optional map.json entry (original image URL -> in-zip
+// path). Returns nil if there's no mapping — covers zips built before this
+// existed, and articles with no assets at all.
+func (a Assets) AssetMap() map[string]string {
+	data, err := a.Entry("map.json")
+	if err != nil {
+		return nil
+	}
+	var m map[string]string
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil
+	}
+	return m
+}
+
+// Value implements driver.Valuer so Assets can be written directly as a BLOB.
+func (a Assets) Value() (driver.Value, error) {
+	if len(a.data) == 0 {
+		return nil, nil
+	}
+	return a.data, nil
+}
+
+// Scan implements sql.Scanner, re-parsing the zip so corruption in the
+// database surfaces immediately as a query error instead of only when an
+// asset is later requested.
+func (a *Assets) Scan(src any) error {
+	if src == nil {
+		*a = Assets{}
+		return nil
+	}
+	b, ok := src.([]byte)
+	if !ok {
+		return fmt.Errorf("Assets.Scan: unsupported type %T", src)
+	}
+	parsed, err := NewAssets(append([]byte(nil), b...))
+	if err != nil {
+		return fmt.Errorf("Assets.Scan: %w", err)
+	}
+	*a = parsed
+	return nil
 }
 
 const schema = `

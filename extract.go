@@ -211,9 +211,9 @@ type fetchedImage struct {
 // canceled — are skipped silently, same graceful-degradation philosophy as
 // the userscript's client-side fetch. Returns nil if no images were
 // downloaded.
-func downloadImages(ctx context.Context, urls []string) []byte {
+func downloadImages(ctx context.Context, urls []string) Assets {
 	if len(urls) == 0 {
-		return nil
+		return Assets{}
 	}
 
 	client := &http.Client{Timeout: imageFetchTimeout}
@@ -274,7 +274,7 @@ func downloadImages(ctx context.Context, urls []string) []byte {
 	}
 	if count == 0 {
 		zw.Close()
-		return nil
+		return Assets{}
 	}
 
 	mapJSON, err := json.Marshal(assetMap)
@@ -284,7 +284,8 @@ func downloadImages(ctx context.Context, urls []string) []byte {
 		}
 	}
 	if err := zw.Close(); err != nil {
-		return nil
+		return Assets{}
 	}
-	return buf.Bytes()
+	assets, _ := NewAssets(buf.Bytes())
+	return assets
 }
