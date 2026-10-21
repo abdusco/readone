@@ -403,14 +403,68 @@
   // the real content divs).
   const NON_CONTENT_TAGS = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'LINK', 'META']);
 
+  // Some page builders (seen on a New Yorker piece, CSS-grid laid out) never
+  // use a single <p> tag anywhere in the document — every paragraph is a
+  // bare <div>, either holding only text or only inline markup (links,
+  // emphasis, ...). Readability's own scoring is heavily <p>-weighted (see
+  // its DEFAULT_TAGS_TO_SCORE and its internal div-to-p promotion in
+  // _grabArticle), and while it does promote *some* such divs to <p>
+  // internally, it doesn't catch every shape — notably a div whose only
+  // children are themselves plain text (no wrapping element at all).
+  // Promoting those here, before Readability ever sees the document, makes
+  // both Readability's own scoring and mergeFragmentedContent's <p>-based
+  // "is this actually prose" check (below) work on div-soup pages the same
+  // way they do on <p>-tagged ones.
+  const INLINE_TAGS = new Set([
+    'A', 'SPAN', 'B', 'I', 'EM', 'STRONG', 'BR', 'SUP', 'SUB', 'U', 'MARK',
+    'ABBR', 'CODE', 'IMG', 'PICTURE', 'SOURCE', 'TIME', 'SMALL', 'WBR',
+    'Q', 'CITE', 'KBD', 'VAR', 'BDI', 'BDO',
+  ]);
+  function paragraphizeLeafDivs(root) {
+    function walk(el) {
+      const children = Array.from(el.children);
+      const allInline = children.length > 0 && children.every(c => INLINE_TAGS.has(c.tagName));
+      const textOnly = children.length === 0;
+      if (el.tagName === 'DIV' && (allInline || textOnly) && el.textContent.trim().length > 80) {
+        const p = document.createElement('p');
+        while (el.firstChild) p.appendChild(el.firstChild);
+        el.replaceWith(p);
+      } else {
+        children.forEach(walk);
+      }
+    }
+    walk(root);
+  }
+
   function mergeFragmentedContent(root) {
-    function process(el) {
+    // root itself (typically <body>) is never a merge candidate: its direct
+    // children are whole page sections (nav, main content, cookie-consent
+    // modals, ...), not fragments of one article. Treating body as a merge
+    // parent has been observed to fuse an unrelated modal (e.g. a OneTrust/
+    // Fides cookie-consent overlay, whose policy text is long enough to
+    // count as "substantial") into the real content div, corrupting the
+    // structure Readability needs to find the article — parse() then
+    // returns null instead of the actual content.
+    function process(el, isRoot) {
       const children = Array.from(el.children).filter(c => !NON_CONTENT_TAGS.has(c.tagName));
-      if (children.length >= 3) {
+      if (!isRoot && children.length >= 3) {
         const lens = children.map(c => c.textContent.trim().length);
         const substantial = children.filter((c, i) => lens[i] > 200);
         const trivial = children.filter((c, i) => lens[i] <= 50);
-        if (substantial.length >= 2 && substantial.length + trivial.length === children.length) {
+        // Beyond raw text length, require every "substantial" child to
+        // actually contain a paragraph (after paragraphizeLeafDivs, real
+        // prose always does). This is checked as a group property, not a
+        // per-child filter — pulling a single non-prose child out of the
+        // substantial bucket would silently break the "substantial + trivial
+        // === children.length" accounting below and block the merge
+        // entirely. Without this, page furniture that happens to be
+        // text-heavy (an archive.today capture-banner table, a share-code
+        // textarea, a hamburger-menu list) gets merged into the real content
+        // div just because it clears the length bar, corrupting the tree
+        // Readability needs and losing the article the same way the
+        // cookie-consent-modal case above did.
+        const looksLikeProse = substantial.every(c => c.querySelectorAll('p').length >= 1);
+        if (looksLikeProse && substantial.length >= 2 && substantial.length + trivial.length === children.length) {
           const target = substantial[0];
           for (const c of children) {
             if (c === target) continue;
@@ -419,9 +473,9 @@
           }
         }
       }
-      children.forEach(process);
+      children.forEach(c => process(c, false));
     }
-    process(root);
+    process(root, true);
   }
 
   // Readability's own boilerplate cleanup can strip an <li>'s children
@@ -448,6 +502,29 @@
     return doc.body.innerHTML;
   }
 
+  // Cookie-consent SDKs (OneTrust, Fides, Cookiebot, Didomi, Usercentrics,
+  // Quantcast Choice, TrustArc, ...) inject a container that stays in the DOM
+  // even once dismissed/hidden, packed with dense legalese paragraphs and few
+  // links — exactly the text/link-density profile Readability's own
+  // candidate scoring rewards. On pages where that container's text outweighs
+  // the actual article (seen on a Wirecutter page: a 25k-char consent dialog
+  // vs. ~5k chars of real article), _grabArticle() picks the consent dialog
+  // as the "top candidate" and the real content is silently dropped — no
+  // error, just an empty-looking extraction. Strip these before Readability
+  // ever sees them, on the clone only, so the live consent banner (which the
+  // user may still need to interact with) is untouched.
+  const CONSENT_OVERLAY_SELECTORS = [
+    '#fides-overlay-wrapper', '#onetrust-consent-sdk', '#onetrust-pc-sdk',
+    '#CybotCookiebotDialog', '#qc-cmp2-container', '#didomi-host',
+    '#usercentrics-root', '#truste-consent-track',
+    '[id*="cookie-consent" i]', '[id*="cookie-banner" i]',
+    '[class*="cookie-consent" i]', '[class*="cookie-banner" i]',
+    '[id*="consent-manager" i]', '[class*="consent-manager" i]',
+  ].join(',');
+  function removeConsentOverlays(root) {
+    root.querySelectorAll(CONSENT_OVERLAY_SELECTORS).forEach(el => el.remove());
+  }
+
   async function extract() {
     await ensureLibraries();
     await autoScrollFullPage();
@@ -459,6 +536,8 @@
     const lead = findLeadImage(document.body);
 
     const docClone = document.cloneNode(true);
+    removeConsentOverlays(docClone.body);
+    paragraphizeLeafDivs(docClone.body);
     mergeFragmentedContent(docClone.body);
     const reader = new unsafeWindow.Readability(docClone, { charThreshold: 100 });
     const art = reader.parse();
