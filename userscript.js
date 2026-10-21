@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Readability by readone
 // @namespace    readable-extractor
-// @version      2.3
+// @version      2.4
 // @description  Simplify page with Readability.js, save to ReadOne
 // @match        *://*/*
 // @noframes
