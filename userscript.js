@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Readability by readone
 // @namespace    readable-extractor
-// @version      2.4
+// @version      2.5
 // @description  Simplify page with Readability.js, save to ReadOne
 // @match        *://*/*
 // @noframes
@@ -586,19 +586,26 @@
         :host {
           all: initial !important;
           --bg: #f6f7f9; --surface: #ffffff; --border: #dde1e6; --text: #111827;
-          --text-muted: #4b5563; --accent: #4f46e5; --shadow: 0 1px 2px rgba(16, 24, 40, .06);
+          --text-muted: #4b5563; --accent: #4338ca; --link: #3730a3; --shadow: 0 1px 2px rgba(16, 24, 40, .06);
           --radius: 10px;
           display: block !important;
           position: fixed !important; inset: 0 !important; z-index: 2147483647 !important; overflow-y: auto !important;
           background: var(--bg) !important; color: var(--text) !important;
+          color-scheme: light !important;
           font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
           font-size: 16px !important;
           line-height: 1.5 !important; -webkit-font-smoothing: antialiased;
         }
+        :host([data-theme="dark"]) {
+          --bg: #101215; --surface: #191c22; --border: #2e323b; --text: #e5e7eb;
+          --text-muted: #b4bac5; --accent: #4f46e5; --link: #a5b4fc; --shadow: 0 1px 2px rgba(0, 0, 0, .3);
+          color-scheme: dark !important;
+        }
         @media (prefers-color-scheme: dark) {
-          :host {
+          :host(:not([data-theme="light"]):not([data-theme="dark"])) {
             --bg: #101215; --surface: #191c22; --border: #2e323b; --text: #e5e7eb;
-            --text-muted: #9aa1ad; --accent: #818cf8; --shadow: 0 1px 2px rgba(0, 0, 0, .3);
+            --text-muted: #b4bac5; --accent: #4f46e5; --link: #a5b4fc; --shadow: 0 1px 2px rgba(0, 0, 0, .3);
+            color-scheme: dark !important;
           }
         }
         #re-toolbar {
@@ -620,6 +627,8 @@
         }
         #re-meta { color: var(--text-muted); font-size: 14px; margin-bottom: 24px; }
         #re-body { font-family: Georgia, serif; font-size: 18px; line-height: 1.6; }
+        #re-body { color: var(--text); }
+        #re-body a { color: var(--link) !important; }
         #re-body p + p { margin-top: 1rem; }
         #re-body img { max-width: 100%; height: auto; display: block; margin: 12px 0; border-radius: 6px; }
         #re-body pre {
@@ -636,11 +645,10 @@
         #re-settings { position: relative; }
         #re-settings-toggle { width: 36px; height: 36px; padding: 0; justify-content: center; font-size: 15px; font-weight: 600; }
         #re-settings-panel {
-          position: absolute; top: 44px; right: 0; width: 220px;
+          position: absolute; inset: auto 0 auto auto; top: 44px; margin: 0; width: 220px;
           background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
           box-shadow: var(--shadow); padding: 12px; z-index: 3;
         }
-        #re-settings-panel[hidden] { display: none; }
         #re-settings .settings-group + .settings-group { margin-top: 10px; }
         #re-settings .settings-label { display: block; font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; }
         #re-settings .segmented { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
@@ -648,16 +656,13 @@
         #re-settings .segmented button + button { border-left: 1px solid var(--border); }
         #re-settings .segmented button.active { background: var(--accent); color: #fff; }
         #re-settings .segmented button:hover:not(.active) { background: var(--bg); border-color: var(--border); }
-        @media (prefers-color-scheme: dark) {
-          #re-settings .segmented button.active { color: #101215; }
-        }
       </style>
       <div id="re-toolbar">
         <button id="re-close">✕ Close</button>
         <div class="re-spacer"></div>
         <div id="re-settings">
           <button id="re-settings-toggle" aria-haspopup="true" aria-expanded="false">Aa</button>
-          <div id="re-settings-panel" hidden>
+          <div id="re-settings-panel" popover="auto">
             <div class="settings-group">
               <span class="settings-label">Font</span>
               <div class="segmented" data-setting="font">
@@ -680,6 +685,14 @@
                 <button type="button" data-value="wide">Wide</button>
               </div>
             </div>
+            <div class="settings-group">
+              <span class="settings-label">Theme</span>
+              <div class="segmented" data-setting="theme">
+                <button type="button" data-value="system">System</button>
+                <button type="button" data-value="light">Light</button>
+                <button type="button" data-value="dark">Dark</button>
+              </div>
+            </div>
           </div>
         </div>
         ${saveConfigured ? '<button id="re-save">💾 Save</button>' : ''}
@@ -692,7 +705,6 @@
     `;
     document.body.appendChild(overlay);
 
-    root.querySelector('#re-close').onclick = () => overlay.remove();
     if (saveConfigured) {
       const saveBtn = root.querySelector('#re-save');
       saveBtn.onclick = async () => {
@@ -717,7 +729,7 @@
   // in GM storage (not localStorage) so the preference is one global value
   // instead of being siloed per-origin the reader button happens to run on.
   const READER_SETTINGS_KEY = 're-reader-settings';
-  const READER_SETTINGS_DEFAULTS = { font: 'serif', size: 'm', width: 'narrow' };
+  const READER_SETTINGS_DEFAULTS = { font: 'serif', size: 'm', width: 'narrow', theme: 'system' };
 
   function wireReaderSettings(overlay, root) {
     const settings = Object.assign(
@@ -731,6 +743,8 @@
       overlay.classList.toggle('size-s', settings.size === 's');
       overlay.classList.toggle('size-l', settings.size === 'l');
       overlay.classList.toggle('width-wide', settings.width === 'wide');
+      if (settings.theme === 'light' || settings.theme === 'dark') overlay.dataset.theme = settings.theme;
+      else delete overlay.dataset.theme;
       root.querySelectorAll('.segmented').forEach(group => {
         const key = group.dataset.setting;
         group.querySelectorAll('button').forEach(btn => {
@@ -750,24 +764,27 @@
 
     const toggle = root.querySelector('#re-settings-toggle');
     const panel = root.querySelector('#re-settings-panel');
+    const closeOverlay = () => {
+      document.removeEventListener('keydown', onEscape);
+      overlay.remove();
+    };
+    root.querySelector('#re-close').onclick = closeOverlay;
     toggle.addEventListener('click', e => {
       e.stopPropagation();
-      const open = panel.hasAttribute('hidden');
-      if (open) panel.removeAttribute('hidden'); else panel.setAttribute('hidden', '');
-      toggle.setAttribute('aria-expanded', String(open));
+      if (panel.matches(':popover-open')) panel.hidePopover();
+      else panel.showPopover();
     });
-    // Listens on the shadow root, not the host overlay div: a listener on
-    // the host would see every click's e.target retargeted to the host
-    // itself (standard shadow-DOM event retargeting for listeners outside
-    // the tree the event originated in), making panel.contains(e.target)
-    // and e.target !== toggle always true and closing the panel on its own
-    // first click.
-    root.addEventListener('click', e => {
-      if (!panel.hasAttribute('hidden') && !panel.contains(e.target) && e.target !== toggle) {
-        panel.setAttribute('hidden', '');
-        toggle.setAttribute('aria-expanded', 'false');
-      }
+    panel.addEventListener('toggle', () => {
+      toggle.setAttribute('aria-expanded', String(panel.matches(':popover-open')));
     });
+    const onEscape = e => {
+      if (e.key !== 'Escape' || !overlay.isConnected) return;
+      // The browser dismisses an open auto popover after this key event.
+      // Let that first Escape go through; a subsequent Escape closes Reader.
+      if (panel.matches(':popover-open')) return;
+      closeOverlay();
+    };
+    document.addEventListener('keydown', onEscape);
 
     apply();
   }

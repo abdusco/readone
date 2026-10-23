@@ -12,10 +12,12 @@
     var font = localStorage.getItem('readone.font');
     var size = localStorage.getItem('readone.size');
     var width = localStorage.getItem('readone.width');
+    var theme = localStorage.getItem('readone.theme');
     if (font === 'sans') d.classList.add('font-sans');
     if (size === 's') d.classList.add('size-s');
     if (size === 'l') d.classList.add('size-l');
     if (width === 'wide') d.classList.add('width-wide');
+    if (theme === 'light' || theme === 'dark') d.dataset.theme = theme;
   })();
 </script>
 </head>
@@ -24,7 +26,7 @@
 
   <div class="settings">
     <button class="settings-toggle" id="settingsToggle" type="button" aria-label="Reading settings" aria-haspopup="true" aria-expanded="false">Aa</button>
-    <div class="settings-panel" id="settingsPanel" hidden>
+    <div class="settings-panel" id="settingsPanel" popover="auto">
       <div class="settings-group">
         <span class="settings-label">Font</span>
         <div class="segmented" data-setting="font">
@@ -47,6 +49,14 @@
           <button type="button" data-value="wide">Wide</button>
         </div>
       </div>
+      <div class="settings-group">
+        <span class="settings-label">Theme</span>
+        <div class="segmented" data-setting="theme">
+          <button type="button" data-value="system">System</button>
+          <button type="button" data-value="light">Light</button>
+          <button type="button" data-value="dark">Dark</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -59,7 +69,7 @@
 
   <script>
     (function () {
-      var defaults = { font: 'serif', size: 'm', width: 'narrow' };
+      var defaults = { font: 'serif', size: 'm', width: 'narrow', theme: 'system' };
       var settings = {};
       for (var key in defaults) {
         settings[key] = localStorage.getItem('readone.' + key) || defaults[key];
@@ -74,6 +84,8 @@
         root.classList.toggle('size-s', settings.size === 's');
         root.classList.toggle('size-l', settings.size === 'l');
         root.classList.toggle('width-wide', settings.width === 'wide');
+        if (settings.theme === 'light' || settings.theme === 'dark') root.dataset.theme = settings.theme;
+        else delete root.dataset.theme;
 
         document.querySelectorAll('.segmented').forEach(function (group) {
           var key = group.dataset.setting;
@@ -94,15 +106,11 @@
 
       toggle.addEventListener('click', function (e) {
         e.stopPropagation();
-        var open = panel.hasAttribute('hidden');
-        if (open) panel.removeAttribute('hidden'); else panel.setAttribute('hidden', '');
-        toggle.setAttribute('aria-expanded', String(open));
+        if (panel.matches(':popover-open')) panel.hidePopover();
+        else panel.showPopover();
       });
-      document.addEventListener('click', function (e) {
-        if (!panel.hasAttribute('hidden') && !panel.contains(e.target) && e.target !== toggle) {
-          panel.setAttribute('hidden', '');
-          toggle.setAttribute('aria-expanded', 'false');
-        }
+      panel.addEventListener('toggle', function () {
+        toggle.setAttribute('aria-expanded', String(panel.matches(':popover-open')));
       });
 
       apply();
